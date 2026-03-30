@@ -6,6 +6,46 @@ import { generateDeploymentCode } from "./lib/deployment";
 import Icon from "./components/Icon";
 import CloudBadge from "./components/CloudBadge";
 import { S } from "./styles/appStyles";
+
+const ALLOWED_VCPU = [1, 2, 4, 8, 16];
+const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
+const ALLOWED_APP_TYPES = ["web", "api", "ml", "db", "batch"];
+const ALLOWED_CLOUDS = ["all", "aws", "gcp", "azure"];
+
+function pickNearest(value, options) {
+  return options.reduce((best, current) => {
+    return Math.abs(current - value) < Math.abs(best - value) ? current : best;
+  }, options[0]);
+}
+
+function stripMarkdownJson(raw) {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return (fenced?.[1] || raw).trim();
+}
+
+function normalizeGeneratedForm(candidate, fallback) {
+  const appType = ALLOWED_APP_TYPES.includes(candidate?.appType) ? candidate.appType : fallback.appType;
+  const preferredCloud = ALLOWED_CLOUDS.includes(candidate?.preferredCloud)
+    ? candidate.preferredCloud
+    : fallback.preferredCloud;
+
+  const vcpuRaw = Number(candidate?.vcpu);
+  const ramRaw = Number(candidate?.ram);
+  const trafficRaw = Number(candidate?.traffic);
+  const budgetRaw = Number(candidate?.budget);
+  const durationRaw = Number(candidate?.duration);
+
+  return {
+    appType,
+    vcpu: Number.isFinite(vcpuRaw) ? pickNearest(Math.max(1, vcpuRaw), ALLOWED_VCPU) : fallback.vcpu,
+    ram: Number.isFinite(ramRaw) ? pickNearest(Math.max(1, ramRaw), ALLOWED_RAM) : fallback.ram,
+    traffic: Number.isFinite(trafficRaw) ? Math.max(100, Math.round(trafficRaw)) : fallback.traffic,
+    budget: Number.isFinite(budgetRaw) ? Math.max(10, Math.round(budgetRaw)) : fallback.budget,
+    duration: Number.isFinite(durationRaw) ? Math.max(1, Math.round(durationRaw)) : fallback.duration,
+    preferredCloud,
+  };
+}
+
 export default function CloudTwin() {
   const [tab, setTab] = useState("simulator");
   const [form, setForm] = useState({
@@ -29,6 +69,10 @@ export default function CloudTwin() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [pricingTs, setPricingTs] = useState("");
+  const [aiScenario, setAiScenario] = useState("Build an API service for 20k users/month under $250 budget, low latency in US regions.");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiLastSummary, setAiLastSummary] = useState("");
+  const [aiError, setAiError] = useState("");
   const chatEndRef = useRef(null);
   const [pricingData, setPricingData] = useState(null);
 
@@ -44,16 +88,58 @@ export default function CloudTwin() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const handleSimulate = async () => {
+  const runAndSetSimulation = async (inputForm) => {
     setSimulating(true);
     setResults([]);
     setSelectedResult(null);
     setShowCode(false);
     await new Promise(r => setTimeout(r, 1800));
-    const res = runSimulation(form);
+    const res = runSimulation(inputForm);
     setResults(res);
     setSelectedResult(res[0]);
     setSimulating(false);
+  };
+
+  const handleSimulate = async () => {
+    await runAndSetSimulation(form);
+  };
+
+  const handleGenerateAndSimulate = async () => {
+    if (!aiScenario.trim() || aiGenerating || simulating) return;
+    setAiGenerating(true);
+    setAiError("");
+    try {
+      const reply = await callGroq(
+        [{ role: "user", content: aiScenario.trim() }],
+        `You convert user cloud workload descriptions into simulator inputs.
+Return ONLY JSON (no prose, no markdown) with this shape:
+{
+  "appType": "web|api|ml|db|batch",
+  "vcpu": number,
+  "ram": number,
+  "traffic": number,
+  "budget": number,
+  "duration": number,
+  "preferredCloud": "all|aws|gcp|azure",
+  "summary": "short one-line assumption summary"
+}
+Rules:
+- Use realistic values.
+- Keep monthly budget in USD.
+- Keep traffic as requests per minute.
+- Prefer cloud="all" unless user strongly states a provider.`
+      );
+
+      const parsed = JSON.parse(stripMarkdownJson(reply));
+      const generatedForm = normalizeGeneratedForm(parsed, form);
+      setForm(generatedForm);
+      setAiLastSummary(typeof parsed.summary === "string" ? parsed.summary : "AI generated a simulation profile from your prompt.");
+      await runAndSetSimulation(generatedForm);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to generate simulation profile.";
+      setAiError(msg);
+    }
+    setAiGenerating(false);
   };
 
   const handleCopyCode = () => {
@@ -197,10 +283,54 @@ export default function CloudTwin() {
                   </div>
                 ))}
 
+                <div style={{ marginTop: 8, marginBottom: 14 }}>
+                  <label style={S.label}>Generate Inputs with AI</label>
+                  <textarea
+                    style={{
+                      ...S.input,
+                      minHeight: 88,
+                      resize: "vertical",
+                      paddingTop: 10,
+                      lineHeight: 1.35,
+                    }}
+                    value={aiScenario}
+                    onChange={e => setAiScenario(e.target.value)}
+                    placeholder="Describe your workload and constraints, then let AI generate the simulation profile."
+                  />
+                  <button
+                    style={{ ...S.btn("secondary"), marginTop: 10 }}
+                    onClick={handleGenerateAndSimulate}
+                    disabled={aiGenerating || simulating || !aiScenario.trim()}
+                  >
+                    {aiGenerating ? (
+                      <>
+                        <span style={{
+                          width: 16, height: 16, border: "2px solid #3b82f640",
+                          borderTopColor: "#3b82f6", borderRadius: "50%",
+                          animation: "spin 0.8s linear infinite", display: "inline-block"
+                        }} />
+                        Generating Profile...
+                      </>
+                    ) : (
+                      <><Icon name="star" size={15} /> Generate & Simulate</>
+                    )}
+                  </button>
+                  {aiLastSummary && !aiError && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#93c5fd" }}>
+                      AI assumptions: {aiLastSummary}
+                    </div>
+                  )}
+                  {aiError && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#fca5a5" }}>
+                      {aiError}
+                    </div>
+                  )}
+                </div>
+
                 <button
                   style={{ ...S.btn("primary"), marginTop: 8 }}
                   onClick={handleSimulate}
-                  disabled={simulating}
+                  disabled={simulating || aiGenerating}
                 >
                   {simulating ? (
                     <>
