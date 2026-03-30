@@ -43,9 +43,11 @@ body {
   0% {
     transform: translate3d(-10vw, 0, 0) scale(1);
   }
+
   50% {
     transform: translate3d(8vw, -10px, 0) scale(1.06);
   }
+
   100% {
     transform: translate3d(-10vw, 0, 0) scale(1);
   }
@@ -56,10 +58,12 @@ body {
     transform: translateX(-30%) translateY(0px);
     opacity: 0.2;
   }
+
   50% {
     transform: translateX(0%) translateY(-8px);
     opacity: 0.34;
   }
+
   100% {
     transform: translateX(30%) translateY(0px);
     opacity: 0.2;
@@ -67,10 +71,12 @@ body {
 }
 
 @keyframes chipFloat {
+
   0%,
   100% {
     transform: translateY(0px);
   }
+
   50% {
     transform: translateY(-10px);
   }
@@ -180,4 +186,357 @@ body {
 
 .floating-chip-slow {
   animation-duration: 6.5s;
+}
+
+/* Live Pricing Animations */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes pricePulse {
+
+  0%,
+  100% {
+    text-shadow: 0 0 0px rgba(76, 175, 80, 0.5);
+  }
+
+  50% {
+    text-shadow: 0 0 12px rgba(76, 175, 80, 0.8);
+  }
+}
+
+@keyframes priceGlow {
+
+  0%,
+  100% {
+    box-shadow: inset 0 0 0px rgba(34, 197, 94, 0.2);
+  }
+
+  50% {
+    box-shadow: inset 0 0 8px rgba(34, 197, 94, 0.4);
+  }
+}
+
+@keyframes fetchingWave {
+
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.pricing-loading {
+  background: linear-gradient(90deg,
+      rgba(51, 65, 85, 0.5),
+      rgba(71, 85, 105, 0.6),
+      rgba(51, 65, 85, 0.5));
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.price-fetching {
+  animation: pricePulse 1.5s ease-in-out;
+}
+
+.price-cell-live {
+  animation: priceGlow 2.5s ease-in-out infinite;
+  border-radius: 0.375rem;
+  position: relative;
+}
+
+.fetching-indicator {
+  animation: fetchingWave 1.5s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* Enhanced Live Pricing Animations */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes borderGlow {
+  0% {
+    border-color: rgba(34, 197, 94, 0.2);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.1);
+  }
+
+  50% {
+    border-color: rgba(34, 197, 94, 0.6);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+
+  100% {
+    border-color: rgba(34, 197, 94, 0.2);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.1);
+  }
+}
+
+@keyframes priceFlip {
+  0% {
+    transform: rotateX(0deg);
+  }
+
+  50% {
+    transform: rotateX(90deg);
+  }
+
+  100% {
+    transform: rotateX(0deg);
+  }
+}
+
+@keyframes priceGlowPulse {
+  0% {
+    color: #4ade80;
+    text-shadow: 0 0 0px rgba(74, 222, 128, 0.8);
+  }
+
+  50% {
+    color: #22c55e;
+    text-shadow: 0 0 15px rgba(34, 197, 94, 1);
+  }
+
+  100% {
+    color: #4ade80;
+    text-shadow: 0 0 0px rgba(74, 222, 128, 0.8);
+  }
+}
+
+@keyframes scanLine {
+  0% {
+    top: -100%;
+  }
+
+  100% {
+    top: 100%;
+  }
+}
+
+@keyframes rowHighlight {
+  0% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: rgba(34, 197, 94, 0.08);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes cellBlink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes instanceNameGlow {
+  0% {
+    color: #0ea5e9;
+    text-shadow: 0 0 0px rgba(14, 165, 233, 0.5);
+  }
+
+  50% {
+    color: #06b6d4;
+    text-shadow: 0 0 12px rgba(6, 182, 212, 0.8);
+  }
+
+  100% {
+    color: #0ea5e9;
+    text-shadow: 0 0 0px rgba(14, 165, 233, 0.5);
+  }
+}
+
+@keyframes dotBounce {
+
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+
+  40% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes tableScan {
+  0% {
+    background-position: -1000px 0;
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+
+  100% {
+    background-position: 1000px 0;
+    opacity: 0;
+  }
+}
+
+@keyframes headerPulse {
+
+  0%,
+  100% {
+    border-color: rgba(51, 65, 85, 0.5);
+    box-shadow: inset 0 0 0px rgba(96, 165, 250, 0.1);
+  }
+
+  50% {
+    border-color: rgba(96, 165, 250, 0.4);
+    box-shadow: inset 0 0 12px rgba(96, 165, 250, 0.2);
+  }
+}
+
+@keyframes numberTick {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes borderSweep {
+  0% {
+    border-image: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0), transparent) 1;
+  }
+
+  50% {
+    border-image: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.6), transparent) 1;
+  }
+
+  100% {
+    border-image: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0), transparent) 1;
+  }
+}
+
+/* Pricing Card Animation Classes */
+.pricing-card-enter {
+  animation: slideInUp 0.6s ease-out forwards;
+}
+
+.pricing-card-enter-1 {
+  animation-delay: 0.1s;
+}
+
+.pricing-card-enter-2 {
+  animation-delay: 0.2s;
+}
+
+.pricing-card-enter-3 {
+  animation-delay: 0.3s;
+}
+
+.pricing-header-live {
+  animation: borderGlow 3s ease-in-out infinite;
+}
+
+.pricing-table-row {
+  animation: fadeInScale 0.5s ease-out;
+  perspective: 1000px;
+}
+
+.pricing-table-row:hover {
+  animation: rowHighlight 1.2s ease-in-out;
+}
+
+.price-value {
+  animation: priceGlowPulse 2s ease-in-out infinite;
+  font-weight: 700;
+}
+
+.instance-name-live {
+  animation: instanceNameGlow 2.5s ease-in-out infinite;
+}
+
+.price-cell-animated {
+  animation: cellBlink 1.5s ease-in-out infinite;
+}
+
+.header-live {
+  animation: headerPulse 2.5s ease-in-out infinite;
+}
+
+.table-body-scan::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.1), transparent);
+  animation: tableScan 4s infinite;
+  pointer-events: none;
+}
+
+.bounce-1 {
+  animation: dotBounce 1.4s infinite;
+}
+
+.bounce-2 {
+  animation: dotBounce 1.4s infinite;
+  animation-delay: 0.2s;
+}
+
+.bounce-3 {
+  animation: dotBounce 1.4s infinite;
+  animation-delay: 0.4s;
 }

@@ -1,13 +1,13 @@
 import { CLOUD_PRICING } from "../data/cloudPricing";
 
-export function runSimulation(req) {
+export function runSimulation(req, pricingCatalog = CLOUD_PRICING) {
   const { vcpu, ram, traffic, budget, preferredCloud } = req;
   const results = [];
 
   const clouds = preferredCloud === "all" ? ["aws", "gcp", "azure"] : [preferredCloud];
 
   clouds.forEach((cloud) => {
-    Object.entries(CLOUD_PRICING[cloud]).forEach(([instance, spec]) => {
+    Object.entries(pricingCatalog[cloud] || {}).forEach(([instance, spec]) => {
       if (spec.vcpu < vcpu || spec.ram < ram) return;
 
       const monthlyCost = spec.price * 730;

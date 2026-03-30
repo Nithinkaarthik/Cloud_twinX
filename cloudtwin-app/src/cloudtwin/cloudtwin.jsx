@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { callGroq } from "./api/groq";
+import { fetchLivePricingCatalog } from "./api/pricing";
 import { CLOUD_PRICING } from "./data/cloudPricing";
 import { runSimulation } from "./lib/simulation";
 import { generateDeploymentCode } from "./lib/deployment";
 import Icon from "./components/Icon";
 import CloudBadge from "./components/CloudBadge";
+
+const LIVE_REFRESH_MS = 6 * 60 * 60 * 1000;
 
 const ALLOWED_VCPU = [1, 2, 4, 8, 16];
 const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
@@ -112,6 +115,8 @@ export default function CloudTwin() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [pricingTs, setPricingTs] = useState("");
+  const [pricingData, setPricingData] = useState(CLOUD_PRICING);
+  const [pricingSource, setPricingSource] = useState({ aws: "fallback", gcp: "fallback", azure: "fallback" });
   const [aiScenario, setAiScenario] = useState(
     "Build an API service for 20k users per month with low latency in US regions under $250 budget."
   );
@@ -121,9 +126,27 @@ export default function CloudTwin() {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
-    setTimeout(() => {
-      setPricingTs(new Date().toLocaleTimeString());
-    }, 800);
+    let active = true;
+
+    const loadPricing = async () => {
+      const attemptTs = new Date().toLocaleTimeString();
+      const live = await fetchLivePricingCatalog().catch(() => null);
+      if (!active) return;
+
+      setPricingTs(attemptTs);
+      if (!live) return;
+
+      setPricingData(live.catalog);
+      setPricingSource(live.status);
+    };
+
+    loadPricing();
+    const timer = setInterval(loadPricing, LIVE_REFRESH_MS);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -135,11 +158,20 @@ export default function CloudTwin() {
     setResults([]);
     setSelectedResult(null);
     await new Promise((r) => setTimeout(r, 1400));
-    const res = runSimulation(inputForm);
+    const res = runSimulation(inputForm, pricingData);
     setResults(res);
     setSelectedResult(res[0]);
     setSimulating(false);
   };
+
+  const sourceLabel = (cloud) => {
+    const mode = pricingSource[cloud];
+    if (mode === "live") return "Live API";
+    if (mode === "partial-live") return "Partial API";
+    return "Fallback Data";
+  };
+
+  const hasAnyLiveSource = Object.values(pricingSource).some((mode) => mode === "live" || mode === "partial-live");
 
   const handleSimulate = async () => {
     await runAndSetSimulation(form);
@@ -246,11 +278,10 @@ Rules:
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`rounded-lg px-3.5 py-2 font-semibold transition ${
-                  tab === t.id
-                    ? "bg-sky-500 text-white"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-                }`}
+                className={`rounded-lg px-3.5 py-2 font-semibold transition ${tab === t.id
+                  ? "bg-sky-500 text-white"
+                  : "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                  }`}
               >
                 {t.label}
               </button>
@@ -258,8 +289,10 @@ Rules:
           </div>
 
           <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
-            <span className={`h-2 w-2 rounded-full ${pricingTs ? "bg-emerald-400" : "bg-slate-600"}`} />
-            {pricingTs ? `Prices synced ${pricingTs}` : "Syncing prices..."}
+            <span className={`h-2 w-2 rounded-full ${hasAnyLiveSource ? "bg-emerald-400" : pricingTs ? "bg-amber-400" : "bg-slate-600"}`} />
+            {pricingTs
+              ? `${hasAnyLiveSource ? "Prices synced" : "Fallback (API blocked)"} ${pricingTs}`
+              : "Syncing prices..."}
           </div>
         </div>
       </nav>
@@ -479,9 +512,8 @@ Rules:
                       <article
                         key={`${r.cloud}-${r.instance}`}
                         onClick={() => setSelectedResult(r)}
-                        className={`${cardClass} relative mb-3 cursor-pointer p-5 transition hover:-translate-y-0.5 ${
-                          active ? "border-sky-500/70" : ""
-                        } ${i === 0 ? "bg-gradient-to-br from-sky-600/15 via-blue-700/10 to-slate-900/70" : ""}`}
+                        className={`${cardClass} relative mb-3 cursor-pointer p-5 transition hover:-translate-y-0.5 ${active ? "border-sky-500/70" : ""
+                          } ${i === 0 ? "bg-gradient-to-br from-sky-600/15 via-blue-700/10 to-slate-900/70" : ""}`}
                       >
                         {i === 0 && (
                           <span className="absolute right-5 top-0 rounded-b-md bg-gradient-to-r from-sky-500 to-blue-600 px-2.5 py-1 text-[10px] font-bold tracking-[0.14em] text-white">
@@ -547,25 +579,40 @@ Rules:
       {tab === "pricing" && (
         <section className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
           <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Live Cloud Pricing</h2>
-          <p className="mt-2 text-sm text-slate-400">Approximate hourly on-demand rates. Last synced: {pricingTs || "syncing..."}</p>
+          <p className="mt-2 text-sm text-slate-400">
+            Approximate hourly on-demand rates. {hasAnyLiveSource ? "Last synced" : "Last attempt"}: {pricingTs || "syncing..."}
+          </p>
 
           <div className="mt-6 space-y-5">
-            {["aws", "gcp", "azure"].map((cloud) => (
-              <div key={cloud} className={`${cardClass} overflow-hidden p-5`}>
+            {["aws", "gcp", "azure"].map((cloud, cloudIndex) => (
+              <div
+                key={cloud}
+                className={`${cardClass} overflow-hidden p-5 pricing-card-enter pricing-card-enter-${cloudIndex + 1} pricing-header-live`}
+              >
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                   <CloudBadge cloud={cloud} />
-                  <span>
+                  <span className="instance-name-live">
                     {cloud === "aws"
                       ? "Amazon Web Services"
                       : cloud === "gcp"
                         ? "Google Cloud Platform"
                         : "Microsoft Azure"}
                   </span>
+                  <span className={`ml-auto text-xs ${pricingSource[cloud] === "fallback" ? "text-amber-400" : "text-emerald-400"}`}>
+                    {pricingSource[cloud] === "live" && (
+                      <span className="inline-flex items-center gap-1.5 animate-pulse">
+                        <span className="bounce-1 h-1.5 w-1.5 rounded-full bg-current"></span>
+                        <span className="bounce-2 h-1.5 w-1.5 rounded-full bg-current"></span>
+                        <span className="bounce-3 h-1.5 w-1.5 rounded-full bg-current"></span>
+                      </span>
+                    )}
+                    {sourceLabel(cloud)}
+                  </span>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-left text-sm">
+                  <table className="w-full min-w-[640px] text-left text-sm table-body-scan relative">
                     <thead>
-                      <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wide text-slate-400">
+                      <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wide text-slate-400 header-live">
                         {[
                           "Instance",
                           "vCPU",
@@ -581,17 +628,18 @@ Rules:
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(CLOUD_PRICING[cloud]).map(([name, spec], i) => (
+                      {Object.entries(pricingData[cloud] || {}).map(([name, spec], i) => (
                         <tr
                           key={name}
-                          className={`border-b border-slate-900 ${i % 2 === 0 ? "bg-transparent" : "bg-slate-900/45"}`}
+                          className={`border-b border-slate-900 pricing-table-row ${i % 2 === 0 ? "bg-transparent" : "bg-slate-900/45"}`}
+                          style={{ animationDelay: `${i * 0.08}s` }}
                         >
-                          <td className="px-3 py-2.5 font-mono font-semibold text-sky-300">{name}</td>
-                          <td className="px-3 py-2.5 text-slate-100">{spec.vcpu}</td>
-                          <td className="px-3 py-2.5 text-slate-100">{spec.ram} GB</td>
-                          <td className="px-3 py-2.5 font-bold text-emerald-400">${spec.price.toFixed(4)}</td>
-                          <td className="px-3 py-2.5 font-bold text-emerald-400">${(spec.price * 730).toFixed(2)}</td>
-                          <td className="px-3 py-2.5 text-slate-400">{spec.storage}</td>
+                          <td className="px-3 py-2.5 font-mono font-semibold instance-name-live">{name}</td>
+                          <td className="px-3 py-2.5 text-slate-100 price-cell-animated">{spec.vcpu}</td>
+                          <td className="px-3 py-2.5 text-slate-100 price-cell-animated">{spec.ram} GB</td>
+                          <td className="px-3 py-2.5 font-bold text-emerald-400 price-value">${spec.price.toFixed(4)}</td>
+                          <td className="px-3 py-2.5 font-bold text-emerald-400 price-value">${(spec.price * 730).toFixed(2)}</td>
+                          <td className="px-3 py-2.5 text-slate-400 price-cell-animated">{spec.storage}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -601,7 +649,7 @@ Rules:
             ))}
           </div>
 
-          <div className="mt-5 rounded-2xl border border-sky-500/35 bg-sky-500/10 p-4 text-sm text-sky-100">
+          <div className="mt-5 animate-in fade-in-50 duration-1000 rounded-2xl border border-sky-500/35 bg-sky-500/10 p-4 text-sm text-sky-100">
             <div className="flex items-start gap-2">
               <Icon name="info" size={16} />
               <p>
@@ -654,11 +702,10 @@ Rules:
                     <button
                       key={`${r.cloud}-${r.instance}`}
                       onClick={() => setSelectedResult(r)}
-                      className={`rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition ${
-                        active
-                          ? "border-sky-500 bg-sky-500/20 text-sky-200"
-                          : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500"
-                      }`}
+                      className={`rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition ${active
+                        ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                        : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500"
+                        }`}
                     >
                       {r.cloud.toUpperCase()} {r.instance}
                     </button>
@@ -671,11 +718,10 @@ Rules:
                   <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">main.tf</span>
                   <button
                     onClick={handleCopyCode}
-                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                      copied
-                        ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-                        : "border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
-                    }`}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${copied
+                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                      : "border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
+                      }`}
                   >
                     <Icon name={copied ? "check" : "copy"} size={13} />
                     {copied ? "Copied" : "Copy code"}
@@ -718,9 +764,8 @@ Rules:
       </button>
 
       <aside
-        className={`fixed bottom-24 right-6 z-40 flex w-[min(92vw,390px)] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl backdrop-blur transition-all duration-300 ${
-          chatOpen ? "h-[520px] opacity-100" : "h-0 opacity-0"
-        }`}
+        className={`fixed bottom-24 right-6 z-40 flex w-[min(92vw,390px)] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl backdrop-blur transition-all duration-300 ${chatOpen ? "h-[520px] opacity-100" : "h-0 opacity-0"
+          }`}
       >
         <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-4 py-3">
           <div className="flex items-center gap-3">
@@ -741,11 +786,10 @@ Rules:
           {chatMessages.map((msg, i) => (
             <div
               key={`${msg.role}-${i}`}
-              className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm leading-6 ${
-                msg.role === "user"
-                  ? "ml-auto rounded-br-md bg-gradient-to-r from-sky-500 to-blue-600 text-white"
-                  : "rounded-bl-md border border-slate-700 bg-slate-900 text-slate-100"
-              }`}
+              className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm leading-6 ${msg.role === "user"
+                ? "ml-auto rounded-br-md bg-gradient-to-r from-sky-500 to-blue-600 text-white"
+                : "rounded-bl-md border border-slate-700 bg-slate-900 text-slate-100"
+                }`}
             >
               {msg.content}
             </div>
