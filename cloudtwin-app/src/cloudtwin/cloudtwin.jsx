@@ -1,11 +1,10 @@
-﻿import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { callGroq } from "./api/groq";
 import { CLOUD_PRICING } from "./data/cloudPricing";
 import { runSimulation } from "./lib/simulation";
 import { generateDeploymentCode } from "./lib/deployment";
 import Icon from "./components/Icon";
 import CloudBadge from "./components/CloudBadge";
-import { S } from "./styles/appStyles";
 
 const ALLOWED_VCPU = [1, 2, 4, 8, 16];
 const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
@@ -46,6 +45,47 @@ function normalizeGeneratedForm(candidate, fallback) {
   };
 }
 
+const cardClass = "rounded-2xl border border-slate-800/70 bg-slate-900/70 shadow-[0_12px_45px_-22px_rgba(37,99,235,0.7)] backdrop-blur";
+const inputClass = "w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-sky-400";
+const labelClass = "mb-1.5 block text-xs font-semibold tracking-wide text-slate-400";
+
+function buildCloudContext(form, selectedResult) {
+  const base = [
+    `App type: ${form.appType}`,
+    `Requested vCPU: ${form.vcpu}`,
+    `Requested RAM (GB): ${form.ram}`,
+    `Traffic req/min: ${form.traffic}`,
+    `Monthly budget USD: ${form.budget}`,
+    `Preferred cloud: ${form.preferredCloud}`,
+  ];
+
+  if (!selectedResult) {
+    return `${base.join(" | ")} | No simulation result selected yet.`;
+  }
+
+  return `${base.join(" | ")} | Selected result: ${selectedResult.cloud.toUpperCase()} ${selectedResult.instance} | Monthly: $${selectedResult.monthlyCost} | Latency: ${selectedResult.latency}ms | Score: ${selectedResult.score}%`;
+}
+
+function buildCloudSystemPrompt(form, selectedResult) {
+  return `You are CloudTwin AI, a specialist assistant for cloud and AI engineering.
+
+Focus areas:
+- Cloud architecture (AWS, GCP, Azure), Kubernetes, containers, IaC, networking basics.
+- AI workload sizing, GPU/CPU selection guidance, inference and training deployment patterns.
+- Cost optimization, performance tuning, reliability, observability, security best practices.
+
+Behavior:
+- Prioritize practical answers for architecture and implementation.
+- If the user asks for recommendation, provide 2-3 options with tradeoffs.
+- Give concise step-by-step guidance when asked how to do something.
+- Use short sections: Recommendation, Why, Next Steps.
+- If user asks unrelated non-tech topics, briefly steer back to cloud/AI domain.
+- Do not invent exact cloud prices; label estimates clearly.
+
+Current app context:
+${buildCloudContext(form, selectedResult)}`;
+}
+
 export default function CloudTwin() {
   const [tab, setTab] = useState("simulator");
   const [form, setForm] = useState({
@@ -60,27 +100,29 @@ export default function CloudTwin() {
   const [simulating, setSimulating] = useState(false);
   const [results, setResults] = useState([]);
   const [selectedResult, setSelectedResult] = useState(null);
-  const [showCode, setShowCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([
-    { role: "assistant", content: "Hi! I'm CloudTwin AI. Ask me anything about cloud infrastructure, AWS, GCP, Azure, Kubernetes, cost optimization, or deployment strategies." }
+    {
+      role: "assistant",
+      content:
+        "Hi, I am CloudTwin AI. Ask me about cloud architecture, AI workloads, cost optimization, Kubernetes, Terraform, or deployment strategy.",
+    },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [pricingTs, setPricingTs] = useState("");
-  const [aiScenario, setAiScenario] = useState("Build an API service for 20k users/month under $250 budget, low latency in US regions.");
+  const [aiScenario, setAiScenario] = useState(
+    "Build an API service for 20k users per month with low latency in US regions under $250 budget."
+  );
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiLastSummary, setAiLastSummary] = useState("");
   const [aiError, setAiError] = useState("");
   const chatEndRef = useRef(null);
-  const [pricingData, setPricingData] = useState(null);
 
   useEffect(() => {
-    // Simulate "fetching" real-time pricing
     setTimeout(() => {
       setPricingTs(new Date().toLocaleTimeString());
-      setPricingData({ aws: 0.0104, gcp: 0.0076, azure: 0.0104 });
     }, 800);
   }, []);
 
@@ -92,8 +134,7 @@ export default function CloudTwin() {
     setSimulating(true);
     setResults([]);
     setSelectedResult(null);
-    setShowCode(false);
-    await new Promise(r => setTimeout(r, 1800));
+    await new Promise((r) => setTimeout(r, 1400));
     const res = runSimulation(inputForm);
     setResults(res);
     setSelectedResult(res[0]);
@@ -127,13 +168,17 @@ Rules:
 - Use realistic values.
 - Keep monthly budget in USD.
 - Keep traffic as requests per minute.
-- Prefer cloud="all" unless user strongly states a provider.`
+- Prefer cloud=all unless user strongly states a provider.`
       );
 
       const parsed = JSON.parse(stripMarkdownJson(reply));
       const generatedForm = normalizeGeneratedForm(parsed, form);
       setForm(generatedForm);
-      setAiLastSummary(typeof parsed.summary === "string" ? parsed.summary : "AI generated a simulation profile from your prompt.");
+      setAiLastSummary(
+        typeof parsed.summary === "string"
+          ? parsed.summary
+          : "AI generated a simulation profile from your prompt."
+      );
       await runAndSetSimulation(generatedForm);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to generate simulation profile.";
@@ -147,7 +192,7 @@ Rules:
     const code = generateDeploymentCode(selectedResult, form);
     navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), 1600);
     });
   };
 
@@ -155,264 +200,269 @@ Rules:
     if (!chatInput.trim() || chatLoading) return;
     const userMsg = chatInput.trim();
     setChatInput("");
-    setChatMessages(m => [...m, { role: "user", content: userMsg }]);
+    setChatMessages((m) => [...m, { role: "user", content: userMsg }]);
     setChatLoading(true);
     try {
       const reply = await callGroq(
         [{ role: "user", content: userMsg }],
-        `You are CloudTwin AI, an expert cloud infrastructure assistant. You specialize in AWS, GCP, Azure, Kubernetes, Docker, Terraform, cost optimization, serverless, and DevOps. Be concise, technical, and helpful. Format code in plaintext without markdown symbols when possible.`
+        buildCloudSystemPrompt(form, selectedResult)
       );
-      setChatMessages(m => [...m, { role: "assistant", content: reply }]);
+      setChatMessages((m) => [...m, { role: "assistant", content: reply }]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error connecting to AI.";
-      setChatMessages(m => [...m, { role: "assistant", content: msg }]);
+      setChatMessages((m) => [...m, { role: "assistant", content: msg }]);
     }
     setChatLoading(false);
   };
 
-  const deployCode = selectedResult ? generateDeploymentCode(selectedResult, form) : "";
-
-  // Pricing page data
-  const allInstances = Object.entries(CLOUD_PRICING).flatMap(([cloud, insts]) =>
-    Object.entries(insts).map(([name, spec]) => ({ cloud, name, ...spec }))
-  ).sort((a, b) => a.price - b.price);
-
   return (
-    <div style={S.app}>
-      {/* Background grid */}
-      <div style={{
-        position: "fixed", inset: 0, zIndex: 0,
-        backgroundImage: `
-          linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px)
-        `,
-        backgroundSize: "40px 40px",
-        pointerEvents: "none",
-      }} />
-      <div style={{
-        position: "fixed",
-        top: -200, left: "50%", transform: "translateX(-50%)",
-        width: 800, height: 400,
-        background: "radial-gradient(ellipse, rgba(59,130,246,0.12) 0%, transparent 70%)",
-        pointerEvents: "none", zIndex: 0,
-      }} />
+    <div className="relative min-h-screen overflow-x-hidden text-slate-100">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_18%_5%,rgba(56,189,248,0.2),transparent_42%),radial-gradient(circle_at_80%_15%,rgba(59,130,246,0.22),transparent_38%),linear-gradient(180deg,#030712_0%,#071126_100%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(to_right,rgba(56,189,248,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(56,189,248,0.07)_1px,transparent_1px)] bg-[size:42px_42px] opacity-25" />
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className="cloud-drift cloud-drift-1" />
+        <div className="cloud-drift cloud-drift-2" />
+        <div className="cloud-drift cloud-drift-3" />
+        <div className="vapor-sweep" />
+      </div>
 
-      {/* NAV */}
-      <nav style={S.nav}>
-        <div style={S.logo}>
-          <Icon name="cloud" size={26} />
-          <span>Cloud<span style={S.logoAccent}>Twin</span></span>
-          <span style={{ fontSize: 10, background: "#3b82f6", color: "#fff", borderRadius: 4, padding: "1px 6px", fontWeight: 700, letterSpacing: 0.5 }}>BETA</span>
-        </div>
-        <div style={S.navTabs}>
-          {[
-            { id: "simulator", label: "Simulator" },
-            { id: "pricing", label: "Live Pricing" },
-            { id: "deploy", label: "Deploy Code" },
-          ].map(t => (
-            <button key={t.id} style={S.navTab(tab === t.id)} onClick={() => setTab(t.id)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#64748b" }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: pricingTs ? "#22c55e" : "#64748b", display: "inline-block" }} />
-          {pricingTs ? `Prices synced ${pricingTs}` : "Syncing prices..."}
+      <nav className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-8">
+          <div className="flex items-center gap-2.5 text-xl font-bold tracking-tight">
+            <Icon name="cloud" size={22} />
+            <span className="font-[Space_Grotesk]">Cloud</span>
+            <span className="font-[Space_Grotesk] text-sky-400">Twin</span>
+            <span className="rounded-md border border-sky-400/40 bg-sky-400/20 px-2 py-0.5 text-[10px] font-bold tracking-[0.14em] text-sky-200">
+              BETA
+            </span>
+          </div>
+
+          <div className="flex rounded-xl border border-slate-700 bg-slate-900/80 p-1 text-sm">
+            {[
+              { id: "simulator", label: "Simulator" },
+              { id: "pricing", label: "Live Pricing" },
+              { id: "deploy", label: "Deploy Code" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`rounded-lg px-3.5 py-2 font-semibold transition ${
+                  tab === t.id
+                    ? "bg-sky-500 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
+            <span className={`h-2 w-2 rounded-full ${pricingTs ? "bg-emerald-400" : "bg-slate-600"}`} />
+            {pricingTs ? `Prices synced ${pricingTs}` : "Syncing prices..."}
+          </div>
         </div>
       </nav>
 
-      {/* â”€â”€ SIMULATOR TAB â”€â”€ */}
       {tab === "simulator" && (
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={S.hero}>
-            <div style={S.heroTag}>
+        <main className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
+          <div className="relative mb-8 text-center md:mb-10">
+            <div className="pointer-events-none absolute -left-3 top-2 hidden md:block">
+              <div className="floating-chip floating-chip-fast inline-flex items-center gap-2 rounded-full border border-sky-300/40 bg-sky-400/15 px-3 py-1.5 text-[11px] font-semibold text-sky-200">
+                <Icon name="cloud" size={11} />
+                Multi-cloud
+              </div>
+            </div>
+            <div className="pointer-events-none absolute -right-3 top-14 hidden md:block">
+              <div className="floating-chip inline-flex items-center gap-2 rounded-full border border-cyan-300/40 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-200">
+                <Icon name="zap" size={11} />
+                Real-time sim
+              </div>
+            </div>
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-sky-400/35 bg-sky-400/10 px-4 py-1.5 text-xs font-semibold tracking-wide text-sky-300">
               <Icon name="zap" size={12} />
               AI-Powered Cloud Optimization
             </div>
-            <h1 style={S.heroTitle}>
-              Find Your Perfect<br />Cloud Configuration
+            <h1 className="font-[Space_Grotesk] text-4xl font-bold tracking-tight text-white md:text-6xl">
+              Simulate Better Infrastructure
             </h1>
-            <p style={S.heroSub}>
-              Define your requirements. CloudTwin simulates thousands of configurations and recommends the most cost-efficient setup with real pricing data.
+            <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-slate-300 md:text-base">
+              Define your workload and budget. CloudTwin evaluates pricing and fit across major cloud providers
+              and recommends high-efficiency configurations.
             </p>
+            <div className="mt-4 flex justify-center">
+              <div className="floating-chip floating-chip-slow inline-flex items-center gap-2 rounded-full border border-blue-300/35 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-200">
+                <Icon name="server" size={11} />
+                Cost fit score
+              </div>
+            </div>
           </div>
 
-          <div style={S.grid}>
-            {/* Left: Form */}
-            <div>
-              <div style={S.card}>
-                <div style={S.cardTitle}><Icon name="server" size={14} /> Requirements</div>
+          <div className="grid gap-6 lg:grid-cols-[390px_minmax(0,1fr)]">
+            <section className={`${cardClass} p-5 md:p-6`}>
+              <div className="mb-5 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="server" size={14} /> Requirements
+              </div>
 
-                {[
-                  { label: "Application Type", key: "appType", type: "select", opts: [
+              {[
+                {
+                  label: "Application Type",
+                  key: "appType",
+                  type: "select",
+                  opts: [
                     { v: "web", l: "Web Application" },
                     { v: "api", l: "REST API" },
-                    { v: "ml", l: "ML / AI Workload" },
+                    { v: "ml", l: "ML or AI Workload" },
                     { v: "db", l: "Database Server" },
                     { v: "batch", l: "Batch Processing" },
-                  ]},
-                  { label: "vCPU Cores Needed", key: "vcpu", type: "select", opts: [1,2,4,8,16].map(v=>({v,l:`${v} vCPUs`})) },
-                  { label: "RAM Required (GB)", key: "ram", type: "select", opts: [1,2,4,8,16,32,64].map(v=>({v,l:`${v} GB`})) },
-                  { label: "Expected Traffic (req/min)", key: "traffic", type: "number" },
-                  { label: "Monthly Budget (USD)", key: "budget", type: "number" },
-                  { label: "Preferred Cloud Provider", key: "preferredCloud", type: "select", opts: [
+                  ],
+                },
+                {
+                  label: "vCPU Cores Needed",
+                  key: "vcpu",
+                  type: "select",
+                  opts: [1, 2, 4, 8, 16].map((v) => ({ v, l: `${v} vCPUs` })),
+                },
+                {
+                  label: "RAM Required (GB)",
+                  key: "ram",
+                  type: "select",
+                  opts: [1, 2, 4, 8, 16, 32, 64].map((v) => ({ v, l: `${v} GB` })),
+                },
+                { label: "Expected Traffic (req/min)", key: "traffic", type: "number" },
+                { label: "Monthly Budget (USD)", key: "budget", type: "number" },
+                {
+                  label: "Preferred Cloud Provider",
+                  key: "preferredCloud",
+                  type: "select",
+                  opts: [
                     { v: "all", l: "All Providers" },
                     { v: "aws", l: "Amazon AWS" },
                     { v: "gcp", l: "Google Cloud" },
                     { v: "azure", l: "Microsoft Azure" },
-                  ]},
-                ].map(field => (
-                  <div key={field.key} style={{ marginBottom: 16 }}>
-                    <label style={S.label}>{field.label}</label>
-                    {field.type === "select" ? (
-                      <select
-                        style={S.select}
-                        value={form[field.key]}
-                        onChange={e => setForm(f => ({ ...f, [field.key]: isNaN(e.target.value) ? e.target.value : +e.target.value }))}
-                      >
-                        {field.opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                      </select>
-                    ) : (
-                      <input
-                        type="number"
-                        style={S.input}
-                        value={form[field.key]}
-                        onChange={e => setForm(f => ({ ...f, [field.key]: +e.target.value }))}
-                      />
-                    )}
-                  </div>
-                ))}
-
-                <div style={{ marginTop: 8, marginBottom: 14 }}>
-                  <label style={S.label}>Generate Inputs with AI</label>
-                  <textarea
-                    style={{
-                      ...S.input,
-                      minHeight: 88,
-                      resize: "vertical",
-                      paddingTop: 10,
-                      lineHeight: 1.35,
-                    }}
-                    value={aiScenario}
-                    onChange={e => setAiScenario(e.target.value)}
-                    placeholder="Describe your workload and constraints, then let AI generate the simulation profile."
-                  />
-                  <button
-                    style={{ ...S.btn("secondary"), marginTop: 10 }}
-                    onClick={handleGenerateAndSimulate}
-                    disabled={aiGenerating || simulating || !aiScenario.trim()}
-                  >
-                    {aiGenerating ? (
-                      <>
-                        <span style={{
-                          width: 16, height: 16, border: "2px solid #3b82f640",
-                          borderTopColor: "#3b82f6", borderRadius: "50%",
-                          animation: "spin 0.8s linear infinite", display: "inline-block"
-                        }} />
-                        Generating Profile...
-                      </>
-                    ) : (
-                      <><Icon name="star" size={15} /> Generate & Simulate</>
-                    )}
-                  </button>
-                  {aiLastSummary && !aiError && (
-                    <div style={{ marginTop: 10, fontSize: 12, color: "#93c5fd" }}>
-                      AI assumptions: {aiLastSummary}
-                    </div>
-                  )}
-                  {aiError && (
-                    <div style={{ marginTop: 10, fontSize: 12, color: "#fca5a5" }}>
-                      {aiError}
-                    </div>
+                  ],
+                },
+              ].map((field) => (
+                <div key={field.key} className="mb-4">
+                  <label className={labelClass}>{field.label}</label>
+                  {field.type === "select" ? (
+                    <select
+                      className={inputClass}
+                      value={form[field.key]}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          [field.key]: Number.isNaN(+e.target.value) ? e.target.value : +e.target.value,
+                        }))
+                      }
+                    >
+                      {field.opts.map((o) => (
+                        <option key={o.v} value={o.v}>
+                          {o.l}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="number"
+                      className={inputClass}
+                      value={form[field.key]}
+                      onChange={(e) => setForm((f) => ({ ...f, [field.key]: +e.target.value }))}
+                    />
                   )}
                 </div>
+              ))}
 
+              <div className="mt-6 rounded-xl border border-slate-700/70 bg-slate-950/50 p-4">
+                <label className={labelClass}>Generate Inputs with AI</label>
+                <textarea
+                  className={`${inputClass} min-h-[88px] resize-y leading-5`}
+                  value={aiScenario}
+                  onChange={(e) => setAiScenario(e.target.value)}
+                  placeholder="Describe workload and constraints, then generate simulation inputs."
+                />
                 <button
-                  style={{ ...S.btn("primary"), marginTop: 8 }}
-                  onClick={handleSimulate}
-                  disabled={simulating || aiGenerating}
+                  onClick={handleGenerateAndSimulate}
+                  disabled={aiGenerating || simulating || !aiScenario.trim()}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {simulating ? (
+                  {aiGenerating ? (
                     <>
-                      <span style={{
-                        width: 16, height: 16, border: "2px solid #ffffff40",
-                        borderTopColor: "#fff", borderRadius: "50%",
-                        animation: "spin 0.8s linear infinite", display: "inline-block"
-                      }} />
-                      Simulating...
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-300/25 border-t-sky-300" />
+                      Generating profile...
                     </>
                   ) : (
-                    <><Icon name="zap" size={15} /> Run Simulation</>
+                    <>
+                      <Icon name="star" size={14} />
+                      Generate and Simulate
+                    </>
                   )}
                 </button>
+                {aiLastSummary && !aiError && <p className="mt-2 text-xs text-sky-300">AI assumptions: {aiLastSummary}</p>}
+                {aiError && <p className="mt-2 text-xs text-rose-300">{aiError}</p>}
               </div>
 
-              {/* Quick Stats */}
+              <button
+                onClick={handleSimulate}
+                disabled={simulating || aiGenerating}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {simulating ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+                    Simulating...
+                  </>
+                ) : (
+                  <>
+                    <Icon name="zap" size={14} />
+                    Run Simulation
+                  </>
+                )}
+              </button>
+
               {results.length > 0 && (
-                <div style={{ ...S.card, marginTop: 16 }}>
-                  <div style={S.cardTitle}><Icon name="trending" size={14} /> Simulation Summary</div>
-                  <div style={S.statsGrid}>
-                    <div style={S.statCard}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: "#3b82f6" }}>{results.length}</div>
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>Options Found</div>
-                    </div>
-                    <div style={S.statCard}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: "#22c55e" }}>${results[0]?.monthlyCost}</div>
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>Best Price/mo</div>
-                    </div>
-                    <div style={S.statCard}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: "#f59e0b" }}>{results[0]?.score}%</div>
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>Fit Score</div>
-                    </div>
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                    <Icon name="trending" size={13} /> Simulation Summary
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b", textAlign: "center" }}>
-                    Compared across {Object.keys(CLOUD_PRICING).length} cloud providers
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-center">
+                      <div className="text-xl font-extrabold text-sky-400">{results.length}</div>
+                      <div className="text-[11px] text-slate-400">Options</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-center">
+                      <div className="text-xl font-extrabold text-emerald-400">${results[0]?.monthlyCost}</div>
+                      <div className="text-[11px] text-slate-400">Best price</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-center">
+                      <div className="text-xl font-extrabold text-amber-300">{results[0]?.score}%</div>
+                      <div className="text-[11px] text-slate-400">Fit score</div>
+                    </div>
                   </div>
                 </div>
               )}
-            </div>
+            </section>
 
-            {/* Right: Results */}
-            <div>
+            <section>
               {results.length === 0 && !simulating && (
-                <div style={{
-                  ...S.card,
-                  display: "flex", flexDirection: "column",
-                  alignItems: "center", justifyContent: "center",
-                  minHeight: 400, textAlign: "center", color: "#64748b",
-                }}>
-                  <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>â˜</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No simulation yet</div>
-                  <div style={{ fontSize: 13 }}>Fill in your requirements and click Run Simulation</div>
+                <div className={`${cardClass} flex min-h-[430px] flex-col items-center justify-center p-8 text-center`}>
+                  <div className="mb-4 text-5xl text-slate-600">CLOUD</div>
+                  <h3 className="text-lg font-bold text-slate-100">No simulation yet</h3>
+                  <p className="mt-2 text-sm text-slate-400">Fill the form or use AI generation and start simulation.</p>
                 </div>
               )}
 
               {simulating && (
-                <div style={{
-                  ...S.card,
-                  display: "flex", flexDirection: "column",
-                  alignItems: "center", justifyContent: "center",
-                  minHeight: 400, gap: 20,
-                }}>
+                <div className={`${cardClass} flex min-h-[430px] flex-col justify-center gap-4 p-8`}>
                   {[
-                    "Fetching real-time pricing...",
-                    "Analyzing AWS instances...",
-                    "Comparing GCP configurations...",
-                    "Running cost simulation...",
-                    "Ranking by efficiency...",
+                    "Fetching pricing baselines",
+                    "Comparing instance families",
+                    "Scoring performance fit",
+                    "Ranking cost efficiency",
                   ].map((msg, i) => (
-                    <div key={i} style={{
-                      display: "flex", alignItems: "center", gap: 12,
-                      opacity: 0.4 + i * 0.15,
-                      animation: `fadeIn 0.3s ease ${i * 0.3}s both`,
-                    }}>
-                      <div style={{
-                        width: 8, height: 8, borderRadius: "50%",
-                        background: "#3b82f6",
-                        animation: "pulse 1s ease infinite",
-                        animationDelay: `${i * 0.2}s`,
-                      }} />
-                      <span style={{ fontSize: 13, color: "#8892b0" }}>{msg}</span>
+                    <div key={msg} className="flex items-center gap-3 text-slate-300" style={{ opacity: 0.55 + i * 0.12 }}>
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" />
+                      <span className="text-sm">{msg}...</span>
                     </div>
                   ))}
                 </div>
@@ -420,129 +470,128 @@ Rules:
 
               {results.length > 0 && (
                 <div>
-                  <div style={{ ...S.cardTitle, color: "#64748b", fontSize: 12, marginBottom: 16, paddingLeft: 4 }}>
-                    <Icon name="star" size={14} />
-                    TOP CONFIGURATIONS â€” sorted by fit score
+                  <div className="mb-3 flex items-center gap-2 px-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                    <Icon name="star" size={13} /> Top Configurations
                   </div>
-                  {results.map((r, i) => (
-                    <div
-                      key={`${r.cloud}-${r.instance}`}
-                      style={{
-                        ...S.resultCard(i),
-                        border: selectedResult?.instance === r.instance && selectedResult?.cloud === r.cloud
-                          ? "1px solid #3b82f6"
-                          : S.resultCard(i).border,
-                      }}
-                      onClick={() => { setSelectedResult(r); setShowCode(false); }}
-                    >
-                      {i === 0 && (
-                        <div style={{
-                          position: "absolute", top: -1, right: 16,
-                          background: "linear-gradient(135deg, #3b82f6, #6366f1)",
-                          color: "#fff", fontSize: 10, fontWeight: 700,
-                          padding: "2px 10px", borderRadius: "0 0 8px 8px",
-                          letterSpacing: 1,
-                        }}>â­ BEST MATCH</div>
-                      )}
+                  {results.map((r, i) => {
+                    const active = selectedResult?.instance === r.instance && selectedResult?.cloud === r.cloud;
+                    return (
+                      <article
+                        key={`${r.cloud}-${r.instance}`}
+                        onClick={() => setSelectedResult(r)}
+                        className={`${cardClass} relative mb-3 cursor-pointer p-5 transition hover:-translate-y-0.5 ${
+                          active ? "border-sky-500/70" : ""
+                        } ${i === 0 ? "bg-gradient-to-br from-sky-600/15 via-blue-700/10 to-slate-900/70" : ""}`}
+                      >
+                        {i === 0 && (
+                          <span className="absolute right-5 top-0 rounded-b-md bg-gradient-to-r from-sky-500 to-blue-600 px-2.5 py-1 text-[10px] font-bold tracking-[0.14em] text-white">
+                            BEST MATCH
+                          </span>
+                        )}
 
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <CloudBadge cloud={r.cloud} />
-                            <span style={{ fontSize: 16, fontWeight: 800, color: "#fff", fontFamily: "monospace" }}>
-                              {r.instance}
-                            </span>
+                        <div className="mb-3 flex items-start justify-between gap-4">
+                          <div>
+                            <div className="mb-1 flex items-center gap-2">
+                              <CloudBadge cloud={r.cloud} />
+                              <span className="font-mono text-base font-semibold text-white">{r.instance}</span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                              {r.spec.vcpu} vCPU • {r.spec.ram}GB RAM • {r.spec.storage}
+                            </p>
                           </div>
-                          <div style={{ fontSize: 12, color: "#64748b" }}>
-                            {r.spec.vcpu} vCPU Â· {r.spec.ram}GB RAM Â· {r.spec.storage}
+                          <div className="text-right">
+                            <div className="text-2xl font-extrabold text-emerald-400">
+                              ${r.monthlyCost}
+                              <span className="ml-1 text-xs font-medium text-slate-400">/mo</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">${r.annualCost}/yr</div>
                           </div>
                         </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 22, fontWeight: 900, color: "#22c55e" }}>${r.monthlyCost}<span style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>/mo</span></div>
-                          <div style={{ fontSize: 11, color: "#64748b" }}>${r.annualCost}/yr</div>
-                        </div>
-                      </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-                        <div style={S.metric}>
-                          <span style={S.metricVal}>{r.score}%</span>
-                          <span style={S.metricLabel}>Fit Score</span>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <Metric label="Fit" value={`${r.score}%`} />
+                          <Metric label="Latency" value={`${r.latency}ms`} />
+                          <Metric label="CPU Util" value={`${r.utilization}%`} />
+                          <Metric label="Throughput" value={`${r.throughput}`} />
                         </div>
-                        <div style={S.metric}>
-                          <span style={S.metricVal}>{r.latency}ms</span>
-                          <span style={S.metricLabel}>Latency</span>
-                        </div>
-                        <div style={S.metric}>
-                          <span style={S.metricVal}>{r.utilization}%</span>
-                          <span style={S.metricLabel}>CPU Util</span>
-                        </div>
-                        <div style={S.metric}>
-                          <span style={S.metricVal}>{r.throughput}</span>
-                          <span style={S.metricLabel}>req/min</span>
-                        </div>
-                      </div>
 
-                      <div style={S.scoreBar(r.score)} />
-
-                      {r.savings > 0 && (
-                        <div style={{ ...S.tag("#22c55e"), marginTop: 10, display: "inline-block", fontSize: 11 }}>
-                          Saves ${r.savings.toFixed(2)}/mo vs budget
+                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <div className="h-full bg-gradient-to-r from-sky-400 to-blue-500" style={{ width: `${r.score}%` }} />
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {r.savings > 0 && (
+                          <div className="mt-3 inline-flex rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-300">
+                            Saves ${r.savings.toFixed(2)} per month
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
 
                   {selectedResult && (
                     <button
-                      style={{ ...S.btn("primary"), marginTop: 8 }}
-                      onClick={() => { setShowCode(true); setTab("deploy"); }}
+                      onClick={() => setTab("deploy")}
+                      className="mt-2 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:brightness-110"
                     >
-                      <Icon name="code" size={15} />
+                      <Icon name="code" size={14} />
                       Generate Terraform for {selectedResult.instance}
                     </button>
                   )}
                 </div>
               )}
-            </div>
+            </section>
           </div>
-        </div>
+        </main>
       )}
 
-      {/* â”€â”€ PRICING TAB â”€â”€ */}
       {tab === "pricing" && (
-        <div style={{ position: "relative", zIndex: 1, padding: "40px" }}>
-          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Live Cloud Pricing</h2>
-            <p style={{ color: "#64748b", marginBottom: 30, fontSize: 14 }}>
-              Approximate hourly on-demand rates. Last synced: {pricingTs || "syncing..."}
-            </p>
+        <section className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
+          <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Live Cloud Pricing</h2>
+          <p className="mt-2 text-sm text-slate-400">Approximate hourly on-demand rates. Last synced: {pricingTs || "syncing..."}</p>
 
-            {["aws", "gcp", "azure"].map(cloud => (
-              <div key={cloud} style={{ ...S.card, marginBottom: 20 }}>
-                <div style={S.cardTitle}>
+          <div className="mt-6 space-y-5">
+            {["aws", "gcp", "azure"].map((cloud) => (
+              <div key={cloud} className={`${cardClass} overflow-hidden p-5`}>
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                   <CloudBadge cloud={cloud} />
-                  <span style={{ marginLeft: 8 }}>
-                    {cloud === "aws" ? "Amazon Web Services" : cloud === "gcp" ? "Google Cloud Platform" : "Microsoft Azure"}
+                  <span>
+                    {cloud === "aws"
+                      ? "Amazon Web Services"
+                      : cloud === "gcp"
+                        ? "Google Cloud Platform"
+                        : "Microsoft Azure"}
                   </span>
                 </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left text-sm">
                     <thead>
-                      <tr style={{ borderBottom: "1px solid #1e2a4a" }}>
-                        {["Instance", "vCPU", "RAM", "$/hr", "$/mo (730h)", "Storage"].map(h => (
-                          <th key={h} style={{ textAlign: "left", padding: "8px 12px", color: "#64748b", fontWeight: 600, fontSize: 11, letterSpacing: 0.5 }}>{h}</th>
+                      <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wide text-slate-400">
+                        {[
+                          "Instance",
+                          "vCPU",
+                          "RAM",
+                          "USD/hr",
+                          "USD/mo (730h)",
+                          "Storage",
+                        ].map((h) => (
+                          <th key={h} className="px-3 py-2 font-semibold">
+                            {h}
+                          </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(CLOUD_PRICING[cloud]).map(([name, spec], i) => (
-                        <tr key={name} style={{ borderBottom: "1px solid #0d1224", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                          <td style={{ padding: "10px 12px", fontFamily: "monospace", color: "#93c5fd", fontWeight: 600 }}>{name}</td>
-                          <td style={{ padding: "10px 12px", color: "#e8eaf6" }}>{spec.vcpu}</td>
-                          <td style={{ padding: "10px 12px", color: "#e8eaf6" }}>{spec.ram} GB</td>
-                          <td style={{ padding: "10px 12px", color: "#22c55e", fontWeight: 700 }}>${spec.price.toFixed(4)}</td>
-                          <td style={{ padding: "10px 12px", color: "#22c55e", fontWeight: 700 }}>${(spec.price * 730).toFixed(2)}</td>
-                          <td style={{ padding: "10px 12px", color: "#64748b" }}>{spec.storage}</td>
+                        <tr
+                          key={name}
+                          className={`border-b border-slate-900 ${i % 2 === 0 ? "bg-transparent" : "bg-slate-900/45"}`}
+                        >
+                          <td className="px-3 py-2.5 font-mono font-semibold text-sky-300">{name}</td>
+                          <td className="px-3 py-2.5 text-slate-100">{spec.vcpu}</td>
+                          <td className="px-3 py-2.5 text-slate-100">{spec.ram} GB</td>
+                          <td className="px-3 py-2.5 font-bold text-emerald-400">${spec.price.toFixed(4)}</td>
+                          <td className="px-3 py-2.5 font-bold text-emerald-400">${(spec.price * 730).toFixed(2)}</td>
+                          <td className="px-3 py-2.5 text-slate-400">{spec.storage}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -550,206 +599,199 @@ Rules:
                 </div>
               </div>
             ))}
+          </div>
 
-            <div style={{ ...S.card, background: "rgba(59,130,246,0.05)", border: "1px solid #3b82f630" }}>
-              <div style={{ display: "flex", gap: 10, color: "#60a5fa", fontSize: 13 }}>
-                <Icon name="info" size={16} />
-                <span>Pricing shown is approximate on-demand rates for US regions. Spot/preemptible instances can save 60-90%. Reserved instances save 30-40%. For production deployments, always verify current pricing at your cloud provider's pricing calculator.</span>
-              </div>
+          <div className="mt-5 rounded-2xl border border-sky-500/35 bg-sky-500/10 p-4 text-sm text-sky-100">
+            <div className="flex items-start gap-2">
+              <Icon name="info" size={16} />
+              <p>
+                Pricing shown is approximate for US regions. Spot or reserved models can reduce monthly spend
+                significantly. Validate final pricing with official cloud calculators before production rollout.
+              </p>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* â”€â”€ DEPLOY TAB â”€â”€ */}
       {tab === "deploy" && (
-        <div style={{ position: "relative", zIndex: 1, padding: "40px" }}>
-          <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-            <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Deployment Code</h2>
-            <p style={{ color: "#64748b", marginBottom: 30, fontSize: 14 }}>
-              Production-ready Terraform configuration, generated from your simulation results.
-            </p>
+        <section className="mx-auto max-w-5xl px-4 pb-14 pt-10 md:px-8">
+          <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Deployment Code</h2>
+          <p className="mt-2 text-sm text-slate-400">Terraform configuration generated from your simulation result.</p>
 
-            {!selectedResult ? (
-              <div style={{ ...S.card, textAlign: "center", padding: 60, color: "#64748b" }}>
-                <div style={{ fontSize: 40, marginBottom: 16, opacity: 0.3 }}>{"</>"}</div>
-                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No configuration selected</div>
-                <div style={{ fontSize: 13, marginBottom: 24 }}>Run a simulation first to generate deployment code</div>
-                <button style={{ ...S.btn("secondary"), width: "auto", margin: "0 auto" }} onClick={() => setTab("simulator")}>
-                  Go to Simulator
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Selected instance summary */}
-                <div style={{ ...S.card, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                    <CloudBadge cloud={selectedResult.cloud} />
-                    <div>
-                      <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "monospace", color: "#fff" }}>{selectedResult.instance}</div>
-                      <div style={{ fontSize: 12, color: "#64748b" }}>{selectedResult.spec.vcpu} vCPU Â· {selectedResult.spec.ram}GB RAM</div>
-                    </div>
-                    <div style={{ ...S.tag("#22c55e"), fontSize: 13 }}>Score: {selectedResult.score}%</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: "#22c55e" }}>${selectedResult.monthlyCost}/mo</div>
-                    <div style={{ fontSize: 12, color: "#64748b" }}>~${selectedResult.annualCost}/yr</div>
+          {!selectedResult ? (
+            <div className={`${cardClass} mt-6 p-10 text-center`}>
+              <div className="text-4xl text-slate-600">CODE</div>
+              <p className="mt-3 text-sm text-slate-300">No configuration selected. Run a simulation first.</p>
+              <button
+                onClick={() => setTab("simulator")}
+                className="mt-5 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+              >
+                Go to Simulator
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className={`${cardClass} mt-6 flex flex-wrap items-center justify-between gap-4 p-5`}>
+                <div className="flex items-center gap-3">
+                  <CloudBadge cloud={selectedResult.cloud} />
+                  <div>
+                    <p className="font-mono text-lg font-semibold text-white">{selectedResult.instance}</p>
+                    <p className="text-xs text-slate-400">
+                      {selectedResult.spec.vcpu} vCPU • {selectedResult.spec.ram}GB RAM • score {selectedResult.score}%
+                    </p>
                   </div>
                 </div>
+                <div className="text-right">
+                  <div className="text-2xl font-extrabold text-emerald-400">${selectedResult.monthlyCost}/mo</div>
+                  <div className="text-xs text-slate-400">~${selectedResult.annualCost}/yr</div>
+                </div>
+              </div>
 
-                {/* Other results as chips */}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                  {results.map((r, i) => (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {results.map((r) => {
+                  const active = selectedResult?.instance === r.instance && selectedResult?.cloud === r.cloud;
+                  return (
                     <button
                       key={`${r.cloud}-${r.instance}`}
                       onClick={() => setSelectedResult(r)}
-                      style={{
-                        padding: "6px 14px",
-                        borderRadius: 8,
-                        border: selectedResult?.instance === r.instance && selectedResult?.cloud === r.cloud
-                          ? "1px solid #3b82f6" : "1px solid #1e2a4a",
-                        background: selectedResult?.instance === r.instance && selectedResult?.cloud === r.cloud
-                          ? "#3b82f620" : "transparent",
-                        color: "#e8eaf6",
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        fontFamily: "monospace",
-                      }}
+                      className={`rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition ${
+                        active
+                          ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                          : "border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500"
+                      }`}
                     >
                       {r.cloud.toUpperCase()} {r.instance}
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
+              </div>
 
-                {/* Code block */}
-                <div style={{ position: "relative" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>main.tf â€” Terraform</span>
-                    <button
-                      onClick={handleCopyCode}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 6,
-                        background: copied ? "#22c55e20" : "#3b82f620",
-                        border: `1px solid ${copied ? "#22c55e40" : "#3b82f640"}`,
-                        color: copied ? "#22c55e" : "#3b82f6",
-                        borderRadius: 8, padding: "6px 14px",
-                        cursor: "pointer", fontSize: 12, fontWeight: 600,
-                      }}
-                    >
-                      <Icon name={copied ? "check" : "copy"} size={13} />
-                      {copied ? "Copied!" : "Copy Code"}
-                    </button>
-                  </div>
-                  <div style={S.codeBlock}>
-                    {generateDeploymentCode(selectedResult, form)}
-                  </div>
+              <div className="mt-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">main.tf</span>
+                  <button
+                    onClick={handleCopyCode}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                      copied
+                        ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                        : "border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25"
+                    }`}
+                  >
+                    <Icon name={copied ? "check" : "copy"} size={13} />
+                    {copied ? "Copied" : "Copy code"}
+                  </button>
                 </div>
+                <pre className="max-h-[460px] overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-4 font-['JetBrains_Mono'] text-xs leading-6 text-cyan-300">
+                  {generateDeploymentCode(selectedResult, form)}
+                </pre>
+              </div>
 
-                {/* Instructions */}
-                <div style={{ ...S.card, marginTop: 20 }}>
-                  <div style={S.cardTitle}><Icon name="info" size={14} /> Deployment Steps</div>
-                  {[
-                    "Install Terraform: brew install terraform / apt install terraform",
-                    "Configure cloud credentials (aws configure / gcloud auth / az login)",
-                    "Save the code above as main.tf in a new directory",
-                    "Run: terraform init  â†’  terraform plan  â†’  terraform apply",
-                    "Your instance will be live in ~2 minutes",
-                  ].map((step, i) => (
-                    <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
-                      <div style={{
-                        width: 22, height: 22, borderRadius: "50%",
-                        background: "#3b82f620", border: "1px solid #3b82f640",
-                        color: "#3b82f6", fontSize: 11, fontWeight: 800,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        flexShrink: 0, marginTop: 1,
-                      }}>{i + 1}</div>
-                      <div style={{ fontSize: 13, color: "#8892b0", fontFamily: "monospace", lineHeight: 1.6 }}>{step}</div>
+              <div className={`${cardClass} mt-5 p-5`}>
+                <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                  <Icon name="info" size={13} /> Deployment Steps
+                </div>
+                {[
+                  "Install Terraform on your machine.",
+                  "Authenticate cloud credentials (aws configure, gcloud auth, or az login).",
+                  "Save this template as main.tf in a clean folder.",
+                  "Run terraform init, terraform plan, then terraform apply.",
+                  "Validate network, security, and tags after provisioning.",
+                ].map((step, i) => (
+                  <div key={step} className="mb-2.5 flex items-start gap-3">
+                    <div className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-sky-500/40 bg-sky-500/15 text-xs font-bold text-sky-300">
+                      {i + 1}
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+                    <p className="font-['JetBrains_Mono'] text-xs leading-6 text-slate-300">{step}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
       )}
 
-      {/* â”€â”€ CHAT FAB â”€â”€ */}
-      <button style={S.chatFab} onClick={() => setChatOpen(o => !o)}>
-        <Icon name={chatOpen ? "x" : "chat"} size={22} />
+      <button
+        onClick={() => setChatOpen((o) => !o)}
+        className="fixed bottom-6 right-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_15px_35px_-10px_rgba(56,189,248,0.85)] transition hover:scale-105"
+      >
+        <Icon name={chatOpen ? "x" : "chat"} size={20} />
       </button>
 
-      {/* â”€â”€ CHAT WINDOW â”€â”€ */}
-      <div style={S.chatWindow(chatOpen)}>
-        <div style={S.chatHeader}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: "linear-gradient(135deg, #3b82f6, #6366f1)",
-              display: "flex", alignItems: "center", justifyContent: "center"
-            }}>
-              <Icon name="bot" size={16} />
+      <aside
+        className={`fixed bottom-24 right-6 z-40 flex w-[min(92vw,390px)] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl backdrop-blur transition-all duration-300 ${
+          chatOpen ? "h-[520px] opacity-100" : "h-0 opacity-0"
+        }`}
+      >
+        <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-r from-sky-500 to-blue-600">
+              <Icon name="bot" size={15} />
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>CloudTwin AI</div>
-              <div style={{ fontSize: 10, color: "#22c55e" }}>â— Online Â· Powered by Groq</div>
+              <p className="text-sm font-bold text-white">CloudTwin AI</p>
+              <p className="text-[11px] text-emerald-400">Online - Powered by Groq</p>
             </div>
           </div>
-          <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}>
-            <Icon name="minimize" size={16} />
+          <button onClick={() => setChatOpen(false)} className="text-slate-400 hover:text-slate-200">
+            <Icon name="minimize" size={15} />
           </button>
-        </div>
+        </header>
 
-        <div style={S.chatMessages}>
+        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
           {chatMessages.map((msg, i) => (
-            <div key={i} style={S.chatMsg(msg.role)}>
+            <div
+              key={`${msg.role}-${i}`}
+              className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm leading-6 ${
+                msg.role === "user"
+                  ? "ml-auto rounded-br-md bg-gradient-to-r from-sky-500 to-blue-600 text-white"
+                  : "rounded-bl-md border border-slate-700 bg-slate-900 text-slate-100"
+              }`}
+            >
               {msg.content}
             </div>
           ))}
           {chatLoading && (
-            <div style={S.chatMsg("assistant")}>
-              <span style={{ opacity: 0.6 }}>Thinking</span>
-              {[0, 1, 2].map(i => (
-                <span key={i} style={{
-                  display: "inline-block", width: 4, height: 4,
-                  borderRadius: "50%", background: "#60a5fa",
-                  margin: "0 2px", animation: "bounce 0.6s ease infinite",
-                  animationDelay: `${i * 0.15}s`,
-                }} />
-              ))}
+            <div className="max-w-[86%] rounded-2xl rounded-bl-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200">
+              Thinking <span className="inline-block animate-bounce">.</span>
+              <span className="inline-block animate-bounce [animation-delay:120ms]">.</span>
+              <span className="inline-block animate-bounce [animation-delay:240ms]">.</span>
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
 
-        <div style={S.chatInput}>
+        <div className="flex gap-2 border-t border-slate-800 bg-slate-900/80 p-3">
           <textarea
-            style={S.chatField}
-            value={chatInput}
-            onChange={e => setChatInput(e.target.value)}
-            placeholder="Ask about AWS, GCP, Kubernetes..."
             rows={1}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChat(); } }}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="Ask about AWS, GCP, Kubernetes..."
+            className="h-10 flex-1 resize-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-400"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleChat();
+              }
+            }}
           />
-          <button style={S.chatSend} onClick={handleChat} disabled={chatLoading}>
-            <Icon name="send" size={15} />
+          <button
+            onClick={handleChat}
+            disabled={chatLoading}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 text-white disabled:opacity-60"
+          >
+            <Icon name="send" size={14} />
           </button>
         </div>
-      </div>
+      </aside>
+    </div>
+  );
+}
 
-      {/* CSS Animations */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&display=swap');
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
-        @keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-        select option { background: #0d1224; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #1e2a4a; border-radius: 3px; }
-        textarea { resize: none; }
-      `}</style>
+function Metric({ label, value }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2.5">
+      <div className="text-lg font-extrabold leading-none text-slate-100">{value}</div>
+      <div className="mt-1 text-[11px] text-slate-400">{label}</div>
     </div>
   );
 }
