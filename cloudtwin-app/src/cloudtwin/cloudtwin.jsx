@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useContext } from "react";
+import { AuthContext } from "../context/AuthContext";
 import { callGroq } from "./api/groq";
 import { fetchLivePricingCatalog } from "./api/pricing";
 import { CLOUD_PRICING } from "./data/cloudPricing";
@@ -7,7 +8,7 @@ import { generateDeploymentCode } from "./lib/deployment";
 import Icon from "./components/Icon";
 import CloudBadge from "./components/CloudBadge";
 
-const LIVE_REFRESH_MS = 6 * 60 * 60 * 1000;
+const LIVE_REFRESH_MS = 60 * 1000;
 
 const ALLOWED_VCPU = [1, 2, 4, 8, 16];
 const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
@@ -90,6 +91,7 @@ ${buildCloudContext(form, selectedResult)}`;
 }
 
 export default function CloudTwin() {
+  const { user, logout } = useContext(AuthContext);
   const [tab, setTab] = useState("simulator");
   const [form, setForm] = useState({
     appType: "web",
@@ -288,11 +290,26 @@ Rules:
             ))}
           </div>
 
-          <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
-            <span className={`h-2 w-2 rounded-full ${hasAnyLiveSource ? "bg-emerald-400" : pricingTs ? "bg-amber-400" : "bg-slate-600"}`} />
-            {pricingTs
-              ? `${hasAnyLiveSource ? "Prices synced" : "Fallback (API blocked)"} ${pricingTs}`
-              : "Syncing prices..."}
+          <div className="flex items-center gap-4">
+            <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
+              <span className={`h-2 w-2 rounded-full ${hasAnyLiveSource ? "bg-emerald-400" : pricingTs ? "bg-amber-400" : "bg-slate-600"}`} />
+              {pricingTs
+                ? `${hasAnyLiveSource ? "Prices synced" : "Fallback (API blocked)"} ${pricingTs}`
+                : "Syncing prices..."}
+            </div>
+
+            {user && (
+              <div className="flex items-center gap-2.5 rounded-lg border border-slate-700 bg-slate-800/50 px-3.5 py-2">
+                <Icon name="user" size={14} />
+                <span className="text-xs font-medium text-slate-300 truncate max-w-[100px]">{user.fullName}</span>
+                <button
+                  onClick={logout}
+                  className="ml-1 text-xs font-semibold text-slate-400 hover:text-red-400 transition"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </nav>
