@@ -7,6 +7,8 @@ import { runSimulation } from "./lib/simulation";
 import { generateDeploymentCode } from "./lib/deployment";
 import Icon from "./components/Icon";
 import CloudBadge from "./components/CloudBadge";
+import Dashboard from "../pages/Dashboard";
+import StatAnalysis from "../pages/StatAnalysis";
 
 const LIVE_REFRESH_MS = 60 * 1000;
 
@@ -92,7 +94,7 @@ ${buildCloudContext(form, selectedResult)}`;
 
 export default function CloudTwin() {
   const { user, logout } = useContext(AuthContext);
-  const [tab, setTab] = useState("simulator");
+  const [tab, setTab] = useState("dashboard");
   const [form, setForm] = useState({
     appType: "web",
     vcpu: 2,
@@ -273,9 +275,11 @@ Rules:
 
           <div className="flex rounded-xl border border-slate-700 bg-slate-900/80 p-1 text-sm">
             {[
+              { id: "dashboard", label: "Dashboard" },
               { id: "simulator", label: "Simulator" },
               { id: "pricing", label: "Live Pricing" },
               { id: "deploy", label: "Deploy Code" },
+              { id: "stat-analysis", label: "Stat Analysis" },
             ].map((t) => (
               <button
                 key={t.id}
@@ -313,6 +317,8 @@ Rules:
           </div>
         </div>
       </nav>
+
+      {tab === "dashboard" && <Dashboard />}
 
       {tab === "simulator" && (
         <main className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
@@ -772,6 +778,8 @@ Rules:
           )}
         </section>
       )}
+
+      {tab === "stat-analysis" && <StatAnalysis />}
 
       <button
         onClick={() => setChatOpen((o) => !o)}

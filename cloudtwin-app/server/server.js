@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import { connectDB } from "./db.js";
 import authRoutes from "./routes/auth.js";
+import dashboardRoutes from "./routes/dashboard.js";
 import { getLivePricingCatalog } from "./pricingService.js";
 
 const app = express();
@@ -19,7 +20,21 @@ app.use(cookieParser());
 
 connectDB();
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    name: "CloudTwin API",
+    status: "ok",
+    frontend: "http://localhost:5173",
+    docs: "Use /api/auth and /api/pricing/live endpoints",
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 app.use("/api/auth", authRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.get("/api/pricing/live", async (req, res) => {
   try {
     const gcpApiKey = (process.env.GCP_API_KEY || process.env.FREE_PRICING_API_KEY || "").trim();
