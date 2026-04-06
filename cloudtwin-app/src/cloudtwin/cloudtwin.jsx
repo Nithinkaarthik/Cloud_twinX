@@ -14,6 +14,82 @@ const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
 const ALLOWED_APP_TYPES = ["web", "api", "ml", "db", "batch"];
 const ALLOWED_CLOUDS = ["all", "aws", "gcp", "azure"];
 
+const DUMMY_ANALYTICS = {
+  generatedAt: "2026-04-02T10:30:00Z",
+  kpis: {
+    avgResponseMs: 142,
+    p95LatencyMs: 268,
+    uptimePct: 99.94,
+    monthlyEstimate: 218.42,
+  },
+  monthlyCostByCloud: [
+    { cloud: "AWS", value: 236.5 },
+    { cloud: "GCP", value: 214.2 },
+    { cloud: "Azure", value: 205.7 },
+  ],
+  trafficTrend: [
+    { month: "Jan", requestsK: 124 },
+    { month: "Feb", requestsK: 138 },
+    { month: "Mar", requestsK: 146 },
+    { month: "Apr", requestsK: 159 },
+    { month: "May", requestsK: 172 },
+    { month: "Jun", requestsK: 181 },
+    { month: "Jul", requestsK: 196 },
+    { month: "Aug", requestsK: 208 },
+    { month: "Sep", requestsK: 221 },
+    { month: "Oct", requestsK: 234 },
+    { month: "Nov", requestsK: 246 },
+    { month: "Dec", requestsK: 259 },
+  ],
+  latencyByRegion: [
+    { region: "us-east", p50: 88, p95: 158 },
+    { region: "us-west", p50: 102, p95: 186 },
+    { region: "eu-west", p50: 131, p95: 229 },
+    { region: "ap-south", p50: 149, p95: 262 },
+  ],
+  incidentMix: [
+    { label: "Low", value: 48, color: "#38bdf8" },
+    { label: "Medium", value: 31, color: "#f59e0b" },
+    { label: "High", value: 15, color: "#f97316" },
+    { label: "Critical", value: 6, color: "#ef4444" },
+  ],
+};
+
+const DASHBOARD_SAMPLE = {
+  tenant: {
+    orgName: "CloudNova Retail",
+    accountId: "acct_demo_1024",
+    plan: "Growth",
+    region: "us-east",
+    usersActive: 27,
+    owner: "Ava Johnson",
+  },
+  health: {
+    overall: "Healthy",
+    score: 91,
+    alertsOpen: 3,
+    deploymentsThisMonth: 14,
+    infraCostMtd: 1729.43,
+    budgetUtilizationPct: 68,
+  },
+  environments: [
+    { name: "Production", cloud: "aws", status: "Healthy", services: 12, latencyMs: 128 },
+    { name: "Staging", cloud: "azure", status: "Warning", services: 8, latencyMs: 173 },
+    { name: "Development", cloud: "gcp", status: "Healthy", services: 16, latencyMs: 149 },
+  ],
+  recentDeployments: [
+    { id: "dep_4481", service: "checkout-api", env: "Production", cloud: "aws", status: "Succeeded", at: "09:40" },
+    { id: "dep_4477", service: "search-worker", env: "Staging", cloud: "azure", status: "Succeeded", at: "08:15" },
+    { id: "dep_4474", service: "catalog-ui", env: "Development", cloud: "gcp", status: "Failed", at: "07:28" },
+  ],
+  customerProfiles: [
+    { customerId: "cus_1001", name: "Northwind Stores", tier: "Enterprise", spendMtd: 12340, lastLogin: "2h ago" },
+    { customerId: "cus_1002", name: "BluePeak Health", tier: "Business", spendMtd: 6480, lastLogin: "5h ago" },
+    { customerId: "cus_1003", name: "NovaLearn", tier: "Starter", spendMtd: 1310, lastLogin: "1d ago" },
+    { customerId: "cus_1004", name: "Urban Cart", tier: "Business", spendMtd: 5820, lastLogin: "3d ago" },
+  ],
+};
+
 function pickNearest(value, options) {
   return options.reduce((best, current) => {
     return Math.abs(current - value) < Math.abs(best - value) ? current : best;
@@ -90,7 +166,7 @@ ${buildCloudContext(form, selectedResult)}`;
 }
 
 export default function CloudTwin() {
-  const [tab, setTab] = useState("simulator");
+  const [tab, setTab] = useState("dashboard");
   const [form, setForm] = useState({
     appType: "web",
     vcpu: 2,
@@ -271,9 +347,11 @@ Rules:
 
           <div className="flex rounded-xl border border-slate-700 bg-slate-900/80 p-1 text-sm">
             {[
+              { id: "dashboard", label: "Dashboard" },
               { id: "simulator", label: "Simulator" },
               { id: "pricing", label: "Live Pricing" },
               { id: "deploy", label: "Deploy Code" },
+              { id: "analysis", label: "Stat Analysis" },
             ].map((t) => (
               <button
                 key={t.id}
@@ -296,6 +374,162 @@ Rules:
           </div>
         </div>
       </nav>
+
+      {tab === "dashboard" && (
+        <section className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Control Dashboard</h2>
+              <p className="mt-2 text-sm text-slate-400">
+                Multi-tenant overview with sample customer data. Future-ready for MongoDB login and user-specific dashboards.
+              </p>
+            </div>
+            <button
+              onClick={() => setTab("simulator")}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+            >
+              <Icon name="zap" size={14} />
+              Open Simulator
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <DashboardKpi title="Tenant" value={DASHBOARD_SAMPLE.tenant.orgName} meta={`${DASHBOARD_SAMPLE.tenant.plan} Plan`} tone="sky" />
+            <DashboardKpi title="System Health" value={`${DASHBOARD_SAMPLE.health.score}%`} meta={DASHBOARD_SAMPLE.health.overall} tone="emerald" />
+            <DashboardKpi
+              title="Infra Cost MTD"
+              value={`$${DASHBOARD_SAMPLE.health.infraCostMtd.toFixed(2)}`}
+              meta={`${DASHBOARD_SAMPLE.health.budgetUtilizationPct}% budget used`}
+              tone="amber"
+            />
+            <DashboardKpi
+              title="Open Alerts"
+              value={`${DASHBOARD_SAMPLE.health.alertsOpen}`}
+              meta={`${DASHBOARD_SAMPLE.health.deploymentsThisMonth} deployments this month`}
+              tone="fuchsia"
+            />
+          </div>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="server" size={13} /> Environment Status Board
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <th className="px-3 py-2">Environment</th>
+                      <th className="px-3 py-2">Cloud</th>
+                      <th className="px-3 py-2">Services</th>
+                      <th className="px-3 py-2">Latency</th>
+                      <th className="px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DASHBOARD_SAMPLE.environments.map((env) => (
+                      <tr key={env.name} className="border-b border-slate-900">
+                        <td className="px-3 py-2.5 font-semibold text-white">{env.name}</td>
+                        <td className="px-3 py-2.5">
+                          <CloudBadge cloud={env.cloud} />
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-300">{env.services}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{env.latencyMs} ms</td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={`rounded-md px-2 py-1 text-xs font-semibold ${env.status === "Healthy"
+                              ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                              : "border border-amber-500/40 bg-amber-500/15 text-amber-300"
+                              }`}
+                          >
+                            {env.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="trending" size={13} /> Deployment Activity
+              </div>
+              <div className="space-y-3">
+                {DASHBOARD_SAMPLE.recentDeployments.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-mono text-xs text-slate-300">{item.id}</p>
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${item.status === "Succeeded"
+                          ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                          : "border border-rose-500/40 bg-rose-500/15 text-rose-300"
+                          }`}
+                      >
+                        {item.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-white">{item.service}</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {item.env} • {item.cloud.toUpperCase()} • {item.at}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="chat" size={13} /> Customer Overview (Sample)
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <th className="px-3 py-2">Customer ID</th>
+                      <th className="px-3 py-2">Name</th>
+                      <th className="px-3 py-2">Tier</th>
+                      <th className="px-3 py-2">Spend MTD</th>
+                      <th className="px-3 py-2">Last Login</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DASHBOARD_SAMPLE.customerProfiles.map((customer) => (
+                      <tr key={customer.customerId} className="border-b border-slate-900">
+                        <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{customer.customerId}</td>
+                        <td className="px-3 py-2.5 font-semibold text-white">{customer.name}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{customer.tier}</td>
+                        <td className="px-3 py-2.5 text-emerald-300">${customer.spendMtd.toLocaleString()}</td>
+                        <td className="px-3 py-2.5 text-slate-400">{customer.lastLogin}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="info" size={13} /> Account Snapshot
+              </div>
+              <div className="space-y-3 text-sm">
+                <SnapshotRow label="Owner" value={DASHBOARD_SAMPLE.tenant.owner} />
+                <SnapshotRow label="Account ID" value={DASHBOARD_SAMPLE.tenant.accountId} />
+                <SnapshotRow label="Primary Region" value={DASHBOARD_SAMPLE.tenant.region} />
+                <SnapshotRow label="Active Users" value={`${DASHBOARD_SAMPLE.tenant.usersActive}`} />
+                <SnapshotRow label="Plan" value={DASHBOARD_SAMPLE.tenant.plan} />
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-300">
+                Suggested MongoDB model fields for future auth dashboard: userId, tenantId, role, lastLoginAt, preferredCloud,
+                savedSimulations, deploymentHistory.
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {tab === "simulator" && (
         <main className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
@@ -750,9 +984,77 @@ Rules:
                     <p className="font-['JetBrains_Mono'] text-xs leading-6 text-slate-300">{step}</p>
                   </div>
                 ))}
+
+                <button
+                  onClick={() => setTab("analysis")}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/15 px-4 py-2 text-sm font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/25"
+                >
+                  <Icon name="trending" size={14} />
+                  View Statistical Analysis
+                </button>
               </div>
             </>
           )}
+        </section>
+      )}
+
+      {tab === "analysis" && (
+        <section className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Statistical Analysis</h2>
+              <p className="mt-2 text-sm text-slate-400">
+                Static demo dataset for charts and plots. Timestamp: {new Date(DUMMY_ANALYTICS.generatedAt).toLocaleString()}
+              </p>
+            </div>
+            <button
+              onClick={() => setTab("deploy")}
+              className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+            >
+              Back to Deploy Code
+            </button>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard title="Avg Response" value={`${DUMMY_ANALYTICS.kpis.avgResponseMs} ms`} tone="sky" />
+            <StatCard title="P95 Latency" value={`${DUMMY_ANALYTICS.kpis.p95LatencyMs} ms`} tone="amber" />
+            <StatCard title="Uptime" value={`${DUMMY_ANALYTICS.kpis.uptimePct}%`} tone="emerald" />
+            <StatCard title="Monthly Estimate" value={`$${DUMMY_ANALYTICS.kpis.monthlyEstimate}`} tone="fuchsia" />
+          </div>
+
+          <div className="mt-6 grid gap-5 lg:grid-cols-2">
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="dollar" size={13} /> Cloud Cost Comparison
+              </div>
+              <BarChart
+                data={DUMMY_ANALYTICS.monthlyCostByCloud}
+                formatValue={(value) => `$${value.toFixed(1)}`}
+                suffix="/mo"
+              />
+            </div>
+
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="trending" size={13} /> Request Volume Trend
+              </div>
+              <LineChart data={DUMMY_ANALYTICS.trafficTrend} />
+            </div>
+
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="zap" size={13} /> Regional Latency Plot
+              </div>
+              <LatencyPlot data={DUMMY_ANALYTICS.latencyByRegion} />
+            </div>
+
+            <div className={`${cardClass} p-5`}>
+              <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                <Icon name="info" size={13} /> Incident Severity Mix
+              </div>
+              <DonutChart data={DUMMY_ANALYTICS.incidentMix} />
+            </div>
+          </div>
         </section>
       )}
 
@@ -836,6 +1138,196 @@ function Metric({ label, value }) {
     <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2.5">
       <div className="text-lg font-extrabold leading-none text-slate-100">{value}</div>
       <div className="mt-1 text-[11px] text-slate-400">{label}</div>
+    </div>
+  );
+}
+
+function StatCard({ title, value, tone }) {
+  const toneClass = {
+    sky: "text-sky-300 border-sky-400/35 bg-sky-500/10",
+    amber: "text-amber-300 border-amber-400/35 bg-amber-500/10",
+    emerald: "text-emerald-300 border-emerald-400/35 bg-emerald-500/10",
+    fuchsia: "text-fuchsia-300 border-fuchsia-400/35 bg-fuchsia-500/10",
+  };
+
+  return (
+    <div className={`${cardClass} border ${toneClass[tone] || toneClass.sky} p-4`}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{title}</p>
+      <p className="mt-2 text-2xl font-extrabold text-white">{value}</p>
+    </div>
+  );
+}
+
+function BarChart({ data, formatValue, suffix = "" }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div className="space-y-3">
+      {data.map((item) => {
+        const width = `${(item.value / max) * 100}%`;
+        return (
+          <div key={item.cloud}>
+            <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+              <span className="font-semibold">{item.cloud}</span>
+              <span>{formatValue(item.value)} {suffix}</span>
+            </div>
+            <div className="h-3 rounded-full bg-slate-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-fuchsia-500"
+                style={{ width }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LineChart({ data }) {
+  const width = 620;
+  const height = 240;
+  const padding = 20;
+  const values = data.map((d) => d.requestsK);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = Math.max(max - min, 1);
+  const stepX = (width - padding * 2) / (data.length - 1 || 1);
+
+  const points = data
+    .map((item, i) => {
+      const x = padding + i * stepX;
+      const y = height - padding - ((item.requestsK - min) / range) * (height - padding * 2);
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full rounded-xl border border-slate-800 bg-slate-950/60 p-2">
+        <defs>
+          <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#38bdf8" />
+            <stop offset="50%" stopColor="#3b82f6" />
+            <stop offset="100%" stopColor="#a855f7" />
+          </linearGradient>
+        </defs>
+        <polyline
+          fill="none"
+          stroke="url(#lineGradient)"
+          strokeWidth="4"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          points={points}
+        />
+        {data.map((item, i) => {
+          const x = padding + i * stepX;
+          const y = height - padding - ((item.requestsK - min) / range) * (height - padding * 2);
+          return <circle key={item.month} cx={x} cy={y} r="4" fill="#22d3ee" />;
+        })}
+      </svg>
+      <div className="mt-2 grid grid-cols-6 gap-1 text-center text-[10px] text-slate-400 md:grid-cols-12">
+        {data.map((item) => (
+          <span key={item.month}>{item.month}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LatencyPlot({ data }) {
+  const maxP95 = Math.max(...data.map((d) => d.p95), 1);
+
+  return (
+    <div className="space-y-3">
+      {data.map((item) => {
+        const p50Width = `${(item.p50 / maxP95) * 100}%`;
+        const p95Width = `${(item.p95 / maxP95) * 100}%`;
+        return (
+          <div key={item.region} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs text-slate-300">
+              <span className="font-semibold uppercase">{item.region}</span>
+              <span>P50 {item.p50}ms | P95 {item.p95}ms</span>
+            </div>
+            <div className="space-y-1.5">
+              <div className="h-2 rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-cyan-400" style={{ width: p50Width }} />
+              </div>
+              <div className="h-2 rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-amber-400" style={{ width: p95Width }} />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DonutChart({ data }) {
+  const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+  let offset = 0;
+
+  const segments = data.map((item) => {
+    const start = (offset / total) * 360;
+    offset += item.value;
+    const end = (offset / total) * 360;
+    return `${item.color} ${start}deg ${end}deg`;
+  });
+
+  return (
+    <div className="grid gap-5 md:grid-cols-[180px_1fr] md:items-center">
+      <div
+        className="mx-auto h-44 w-44 rounded-full border border-slate-700"
+        style={{
+          background: `conic-gradient(${segments.join(", ")})`,
+        }}
+      >
+        <div className="m-auto mt-10 flex h-24 w-24 items-center justify-center rounded-full border border-slate-700 bg-slate-950/95 text-xs font-semibold text-slate-300">
+          {total} events
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {data.map((item) => {
+          const pct = ((item.value / total) * 100).toFixed(1);
+          return (
+            <div key={item.label} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="text-slate-200">{item.label}</span>
+              </div>
+              <span className="text-slate-400">{item.value} ({pct}%)</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DashboardKpi({ title, value, meta, tone }) {
+  const toneClass = {
+    sky: "border-sky-500/35 bg-sky-500/10",
+    emerald: "border-emerald-500/35 bg-emerald-500/10",
+    amber: "border-amber-500/35 bg-amber-500/10",
+    fuchsia: "border-fuchsia-500/35 bg-fuchsia-500/10",
+  };
+
+  return (
+    <div className={`${cardClass} border ${toneClass[tone] || toneClass.sky} p-4`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{title}</p>
+      <p className="mt-2 text-xl font-extrabold text-white">{value}</p>
+      <p className="mt-1 text-xs text-slate-300">{meta}</p>
+    </div>
+  );
+}
+
+function SnapshotRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+      <span className="text-slate-400">{label}</span>
+      <span className="font-semibold text-slate-100">{value}</span>
     </div>
   );
 }
