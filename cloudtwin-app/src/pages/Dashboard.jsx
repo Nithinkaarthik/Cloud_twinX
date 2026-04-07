@@ -6,34 +6,18 @@ const fallbackSummary = {
     newUsers7d: 0,
     withCompanyPct: 0,
     latestUsers: [],
+    signupTrend: [],
 };
-
-const providerSplit = [
-    { provider: "AWS", percent: 44, color: "bg-amber-400" },
-    { provider: "Azure", percent: 31, color: "bg-sky-400" },
-    { provider: "GCP", percent: 25, color: "bg-emerald-400" },
-];
-
-const upcomingTasks = [
-    "Right-size analytics-worker CPU from 8 to 4 vCPU",
-    "Enable reserved instances for billing-api",
-    "Move customer-portal cache layer to managed Redis",
-    "Run load test before recommendation-engine scale-up",
-];
 
 const statusMeta = {
     Functional: {
         dotClass: "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]",
         label: "Live section",
     },
-    "Dummy Data": {
-        dotClass: "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.8)]",
-        label: "Stagnant section",
-    },
 };
 
 function StatusChip({ type }) {
-    const meta = statusMeta[type] || statusMeta["Dummy Data"];
+    const meta = statusMeta[type] || statusMeta.Functional;
 
     return (
         <span
@@ -61,16 +45,25 @@ export default function Dashboard() {
 
             try {
                 const token = localStorage.getItem("token");
-                const res = await fetch("http://localhost:5000/api/dashboard/summary", {
+                const summaryRes = await fetch("http://localhost:5000/api/dashboard/summary", {
                     headers: token ? { Authorization: `Bearer ${token}` } : {},
                 });
 
-                if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
+                if (!summaryRes.ok) {
+                    const data = await summaryRes.json().catch(() => ({}));
                     throw new Error(data.error || "Failed to fetch dashboard summary");
                 }
 
-                const data = await res.json();
+                const trendRes = await fetch("http://localhost:5000/api/dashboard/signup-trend", {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+
+                if (!trendRes.ok) {
+                    throw new Error("Failed to fetch signup trend");
+                }
+
+                const data = await summaryRes.json();
+                const trendData = await trendRes.json();
                 if (!active) return;
 
                 setSummary({
@@ -78,6 +71,7 @@ export default function Dashboard() {
                     newUsers7d: Number(data.newUsers7d || 0),
                     withCompanyPct: Number(data.withCompanyPct || 0),
                     latestUsers: Array.isArray(data.latestUsers) ? data.latestUsers : [],
+                    signupTrend: Array.isArray(trendData.trend) ? trendData.trend : [],
                 });
             } catch (error) {
                 if (!active) return;
@@ -94,6 +88,10 @@ export default function Dashboard() {
     }, []);
 
     const summaryCards = useMemo(() => {
+        const avgDaily = summary.signupTrend.length
+            ? Math.round(summary.signupTrend.reduce((sum, item) => sum + Number(item.count || 0), 0) / summary.signupTrend.length)
+            : 0;
+
         return [
             {
                 label: "Registered Users",
@@ -117,14 +115,38 @@ export default function Dashboard() {
                 source: "Functional",
             },
             {
-                label: "Reliability Score",
-                value: "99.92%",
-                delta: "within SLA",
+                label: "Avg Daily Signups",
+                value: summaryLoading ? "..." : String(avgDaily),
+                delta: "Based on last 7 days",
                 tone: "text-violet-300",
-                source: "Dummy Data",
+                source: "Functional",
             },
         ];
     }, [summary, summaryLoading]);
+
+    const functionalBars = useMemo(() => {
+        const max = Math.max(summary.totalUsers, summary.newUsers7d, summary.withCompanyPct, 1);
+        return [
+            { label: "Total Users", value: summary.totalUsers },
+            { label: "New Users 7d", value: summary.newUsers7d },
+            { label: "With Company %", value: summary.withCompanyPct },
+        ].map((item) => ({
+            ...item,
+            pct: Math.max(6, Math.round((item.value / max) * 100)),
+        }));
+    }, [summary]);
+
+    const functionalTrend = summary.signupTrend.length > 0
+        ? summary.signupTrend
+        : Array.from({ length: 7 }, (_, idx) => ({ day: `${idx + 1}`, count: 0 }));
+    const trendMax = Math.max(...functionalTrend.map((point) => Number(point.count || 0)), 1);
+    const trendPoints = functionalTrend
+        .map((point, idx) => {
+            const x = idx * (100 / (functionalTrend.length - 1 || 1));
+            const y = 100 - Math.round((Number(point.count || 0) / trendMax) * 85);
+            return `${x},${y}`;
+        })
+        .join(" ");
 
     return (
         <main className="mx-auto max-w-7xl px-4 pb-10 pt-8 md:px-8 md:pt-10">
@@ -137,7 +159,7 @@ export default function Dashboard() {
                                 Welcome back{user?.fullName ? `, ${user.fullName}` : ""}
                             </h1>
                             <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                                This is a starter dashboard with mock metrics. Next, we can wire these cards and tables to MongoDB-backed APIs.
+                                Live overview of user growth and profile adoption from your backend APIs.
                             </p>
                         </div>
                     </div>
@@ -165,8 +187,50 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <section className="mt-6 grid gap-6 lg:grid-cols-2">
                     <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="font-['Space_Grotesk'] text-xl font-bold text-slate-100">User Growth Bars</h2>
+                            <StatusChip type="Functional" />
+                        </div>
+                        <div className="space-y-4">
+                            {functionalBars.map((row) => (
+                                <div key={row.label}>
+                                    <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+                                        <span>{row.label}</span>
+                                        <span className="font-semibold text-slate-100">{summaryLoading ? "..." : row.value}</span>
+                                    </div>
+                                    <div className="h-2 rounded-full bg-slate-800">
+                                        <div className="h-2 rounded-full bg-emerald-400" style={{ width: `${summaryLoading ? 10 : row.pct}%` }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </article>
+
+                    <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="font-['Space_Grotesk'] text-xl font-bold text-slate-100">Daily Signup Trend (7d)</h2>
+                            <StatusChip type="Functional" />
+                        </div>
+                        <svg viewBox="0 0 100 100" className="h-48 w-full rounded-xl border border-slate-800 bg-slate-950 p-3">
+                            <polyline fill="none" stroke="#34d399" strokeWidth="2.5" points={trendPoints} />
+                            {functionalTrend.map((point, idx) => {
+                                const x = idx * (100 / (functionalTrend.length - 1 || 1));
+                                const y = 100 - Math.round((Number(point.count || 0) / trendMax) * 85);
+                                return <circle key={`${point.day}-${idx}`} cx={x} cy={y} r="1.9" fill="#34d399" />;
+                            })}
+                        </svg>
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                            {functionalTrend.map((point) => (
+                                <span key={point.day} className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1">
+                                    {point.day}: {summaryLoading ? "..." : point.count}
+                                </span>
+                            ))}
+                        </div>
+                    </article>
+
+                    <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5 lg:col-span-2">
                         <div className="mb-4 flex items-center justify-between">
                             <h2 className="font-['Space_Grotesk'] text-xl font-bold text-slate-100">Latest Registered Users</h2>
                             <StatusChip type="Functional" />
@@ -203,42 +267,6 @@ export default function Dashboard() {
                             </table>
                         </div>
                     </article>
-
-                    <aside className="space-y-6">
-                        <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
-                            <div className="mb-2 flex items-center justify-between">
-                                <h3 className="font-['Space_Grotesk'] text-lg font-bold text-slate-100">Cloud Spend Split</h3>
-                                <StatusChip type="Dummy Data" />
-                            </div>
-                            <div className="mt-4 space-y-3">
-                                {providerSplit.map((item) => (
-                                    <div key={item.provider}>
-                                        <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
-                                            <span>{item.provider}</span>
-                                            <span>{item.percent}%</span>
-                                        </div>
-                                        <div className="h-2 rounded-full bg-slate-800">
-                                            <div className={`h-2 rounded-full ${item.color}`} style={{ width: `${item.percent}%` }} />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </article>
-
-                        <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
-                            <div className="mb-2 flex items-center justify-between">
-                                <h3 className="font-['Space_Grotesk'] text-lg font-bold text-slate-100">Next Actions</h3>
-                                <StatusChip type="Dummy Data" />
-                            </div>
-                            <ul className="mt-3 space-y-2 text-sm text-slate-300">
-                                {upcomingTasks.map((task) => (
-                                    <li key={task} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
-                                        {task}
-                                    </li>
-                                ))}
-                            </ul>
-                        </article>
-                    </aside>
                 </section>
             </div>
         </main>

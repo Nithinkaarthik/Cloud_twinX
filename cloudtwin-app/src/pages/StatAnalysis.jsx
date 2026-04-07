@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchLivePricingCatalog } from "../cloudtwin/api/pricing";
 
 const statusMeta = {
-    Functional: {
+    Live: {
         dotClass: "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]",
-        label: "Live section",
+        label: "Live pricing",
     },
-    "Dummy Data": {
-        dotClass: "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.8)]",
-        label: "Stagnant section",
+    Fallback: {
+        dotClass: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.8)]",
+        label: "Fallback pricing",
     },
 };
 
 function StatusDot({ type }) {
-    const meta = statusMeta[type] || statusMeta["Dummy Data"];
+    const meta = statusMeta[type] || statusMeta.Fallback;
 
     return (
         <span className="inline-flex h-3 w-3 rounded-full" title={meta.label} aria-label={meta.label}>
@@ -22,103 +23,153 @@ function StatusDot({ type }) {
 }
 
 export default function StatAnalysis() {
-    const [summary, setSummary] = useState({ totalUsers: 0, newUsers7d: 0, withCompanyPct: 0 });
-    const [signupTrend, setSignupTrend] = useState([]);
+    const [catalog, setCatalog] = useState({ aws: {}, gcp: {}, azure: {} });
+    const [sourceStatus, setSourceStatus] = useState({ aws: "fallback", gcp: "fallback", azure: "fallback" });
+    const [fetchedAt, setFetchedAt] = useState("");
+    const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         let active = true;
 
-        const loadSummary = async () => {
+        const loadPricingAnalysis = async () => {
             setLoading(true);
+            setError("");
+
             try {
-                const token = localStorage.getItem("token");
-                const res = await fetch("http://localhost:5000/api/dashboard/summary", {
-                    headers: token ? { Authorization: `Bearer ${token}` } : {},
-                });
-
-                if (!res.ok) throw new Error("Unable to load stats");
-
-                const data = await res.json();
+                const live = await fetchLivePricingCatalog({ force: true });
                 if (!active) return;
 
-                setSummary({
-                    totalUsers: Number(data.totalUsers || 0),
-                    newUsers7d: Number(data.newUsers7d || 0),
-                    withCompanyPct: Number(data.withCompanyPct || 0),
-                });
-
-                const trendRes = await fetch("http://localhost:5000/api/dashboard/signup-trend", {
-                    headers: token ? { Authorization: `Bearer ${token}` } : {},
-                });
-
-                if (!trendRes.ok) throw new Error("Unable to load signup trend");
-
-                const trendData = await trendRes.json();
-                setSignupTrend(Array.isArray(trendData.trend) ? trendData.trend : []);
-            } catch {
+                setCatalog(live?.catalog || { aws: {}, gcp: {}, azure: {} });
+                setSourceStatus(live?.status || { aws: "fallback", gcp: "fallback", azure: "fallback" });
+                setFetchedAt(live?.fetchedAt || new Date().toISOString());
+            } catch (loadError) {
                 if (!active) return;
-                setSummary({ totalUsers: 0, newUsers7d: 0, withCompanyPct: 0 });
-                setSignupTrend([]);
+
+                setCatalog({ aws: {}, gcp: {}, azure: {} });
+                setSourceStatus({ aws: "fallback", gcp: "fallback", azure: "fallback" });
+                setError(loadError instanceof Error ? loadError.message : "Unable to load live pricing");
             } finally {
                 if (active) setLoading(false);
             }
         };
 
-        loadSummary();
+        loadPricingAnalysis();
+        const interval = setInterval(loadPricingAnalysis, 60 * 1000);
+
         return () => {
             active = false;
+            clearInterval(interval);
         };
     }, []);
 
-    const functionalBars = useMemo(() => {
-        const max = Math.max(summary.totalUsers, summary.newUsers7d, summary.withCompanyPct, 1);
-        return [
-            { label: "Total Users", value: summary.totalUsers },
-            { label: "New Users 7d", value: summary.newUsers7d },
-            { label: "With Company %", value: summary.withCompanyPct },
-        ].map((item) => ({
-            ...item,
-            pct: Math.max(6, Math.round((item.value / max) * 100)),
-        }));
-    }, [summary]);
+    const providerRows = useMemo(() => {
+        const providers = ["aws", "gcp", "azure"];
 
-    const functionalTrend = signupTrend.length > 0 ? signupTrend : Array.from({ length: 7 }, (_, idx) => ({ day: `${idx + 1}`, count: 0 }));
-    const trendMax = Math.max(...functionalTrend.map((p) => p.count), 1);
-    const points = functionalTrend
-        .map((p, i) => {
-            const x = i * (100 / (functionalTrend.length - 1 || 1));
-            const y = 100 - Math.round((p.count / trendMax) * 85);
+        return providers.map((provider) => {
+            const entries = Object.entries(catalog?.[provider] || {});
+            const prices = entries
+                .map(([, spec]) => Number(spec?.price || 0))
+                .filter((price) => Number.isFinite(price) && price > 0);
+
+            const averagePrice = prices.length
+                ? prices.reduce((sum, price) => sum + price, 0) / prices.length
+                : 0;
+
+            const cheapest = entries
+                .filter(([, spec]) => Number(spec?.price || 0) > 0)
+                .sort((a, b) => Number(a[1].price) - Number(b[1].price))[0];
+
+            return {
+                provider,
+                providerLabel: provider.toUpperCase(),
+                instances: entries.length,
+                averagePrice,
+                status: sourceStatus?.[provider] || "fallback",
+                cheapestName: cheapest?.[0] || "-",
+                cheapestPrice: Number(cheapest?.[1]?.price || 0),
+            };
+        });
+    }, [catalog, sourceStatus]);
+
+    const allRows = useMemo(() => {
+        return providerRows
+            .flatMap((provider) => {
+                const entries = Object.entries(catalog?.[provider.provider] || {});
+                return entries.map(([name, spec]) => ({
+                    provider: provider.providerLabel,
+                    instance: name,
+                    vcpu: Number(spec?.vcpu || 0),
+                    ram: Number(spec?.ram || 0),
+                    price: Number(spec?.price || 0),
+                    region: spec?.region || "-",
+                }));
+            })
+            .filter((row) => row.price > 0)
+            .sort((a, b) => a.price - b.price);
+    }, [catalog, providerRows]);
+
+    const cheapestOverall = allRows.slice(0, 10);
+    const averageMax = Math.max(...providerRows.map((row) => row.averagePrice), 0.0001);
+    const statusType = (mode) => (mode === "live" || mode === "partial-live" ? "Live" : "Fallback");
+
+    const liveProviderCount = providerRows.filter(
+        (row) => row.status === "live" || row.status === "partial-live"
+    ).length;
+
+    const summaryText = fetchedAt
+        ? `${liveProviderCount}/3 providers live • updated ${new Date(fetchedAt).toLocaleTimeString()}`
+        : "Loading live pricing status...";
+
+    const pricePoints = cheapestOverall
+        .slice(0, 7)
+        .map((point, idx, arr) => {
+            const x = idx * (100 / (arr.length - 1 || 1));
+            const y = 100 - Math.round((point.price / Math.max(arr[arr.length - 1]?.price || 1, 0.0001)) * 85);
             return `${x},${y}`;
         })
         .join(" ");
-
-    const dummyPie = [35, 25, 20, 20];
 
     return (
         <section className="mx-auto max-w-7xl px-4 pb-14 pt-10 md:px-8">
             <div className="mb-7 rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5 shadow-[0_12px_40px_-20px_rgba(14,165,233,0.55)] md:p-7">
                 <h2 className="font-[Space_Grotesk] text-3xl font-bold tracking-tight text-white">Stat Analysis</h2>
                 <p className="mt-2 text-sm text-slate-300">
-                    Visual statistics dashboard with mixed live and placeholder plots.
+                    Analysis of live cloud pricing catalog across AWS, GCP, and Azure.
                 </p>
+                <p className="mt-2 text-xs text-slate-400">{summaryText}</p>
             </div>
+
+            {error && (
+                <div className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                    Live pricing refresh warning: {error}
+                </div>
+            )}
 
             <div className="grid gap-6 lg:grid-cols-2">
                 <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
                     <div className="mb-4 flex items-center justify-between">
-                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">User Growth Bars</h3>
-                        <StatusDot type="Functional" />
+                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Average Hourly Price by Cloud</h3>
+                        <StatusDot type={liveProviderCount > 0 ? "Live" : "Fallback"} />
                     </div>
                     <div className="space-y-4">
-                        {functionalBars.map((row) => (
-                            <div key={row.label}>
+                        {providerRows.map((row) => (
+                            <div key={row.provider}>
                                 <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
-                                    <span>{row.label}</span>
-                                    <span className="font-semibold text-slate-100">{loading ? "..." : row.value}</span>
+                                    <span>{row.providerLabel}</span>
+                                    <span className="font-semibold text-slate-100">
+                                        {loading ? "..." : `$${row.averagePrice.toFixed(4)}/hr`}
+                                    </span>
                                 </div>
                                 <div className="h-2 rounded-full bg-slate-800">
-                                    <div className="h-2 rounded-full bg-emerald-400" style={{ width: `${loading ? 10 : row.pct}%` }} />
+                                    <div
+                                        className="h-2 rounded-full bg-emerald-400"
+                                        style={{ width: `${loading ? 10 : Math.max(8, Math.round((row.averagePrice / averageMax) * 100))}%` }}
+                                    />
+                                </div>
+                                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                                    <span>{row.instances} instances</span>
+                                    <span>{statusType(row.status)}</span>
                                 </div>
                             </div>
                         ))}
@@ -127,47 +178,79 @@ export default function StatAnalysis() {
 
                 <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
                     <div className="mb-4 flex items-center justify-between">
-                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Daily Signup Trend (7d)</h3>
-                        <StatusDot type="Functional" />
+                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Cheapest Instance Snapshot</h3>
+                        <StatusDot type={liveProviderCount > 0 ? "Live" : "Fallback"} />
                     </div>
-                    <svg viewBox="0 0 100 100" className="h-48 w-full rounded-xl border border-slate-800 bg-slate-950 p-3">
-                        <polyline fill="none" stroke="#34d399" strokeWidth="2.5" points={points} />
-                        {functionalTrend.map((p, i) => {
-                            const x = i * (100 / (functionalTrend.length - 1 || 1));
-                            const y = 100 - Math.round((p.count / trendMax) * 85);
-                            return <circle key={`${p.day}-${i}`} cx={x} cy={y} r="1.9" fill="#34d399" />;
-                        })}
-                    </svg>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-                        {functionalTrend.map((p) => (
-                            <span key={p.day} className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1">
-                                {p.day}: {loading ? "..." : p.count}
-                            </span>
+                    <div className="space-y-3">
+                        {providerRows.map((row) => (
+                            <div key={row.provider} className="rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-3 text-sm text-slate-200">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="font-semibold text-white">{row.providerLabel}</span>
+                                    <span className="text-xs text-slate-400">{statusType(row.status)}</span>
+                                </div>
+                                <p className="mt-1 text-slate-300">{row.cheapestName}</p>
+                                <p className="mt-1 text-xs text-emerald-300">
+                                    {loading ? "..." : `$${row.cheapestPrice.toFixed(4)}/hr`}
+                                </p>
+                            </div>
                         ))}
                     </div>
                 </article>
 
                 <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
                     <div className="mb-4 flex items-center justify-between">
-                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Region Split Pie</h3>
-                        <StatusDot type="Dummy Data" />
+                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Lowest Price Curve</h3>
+                        <StatusDot type={liveProviderCount > 0 ? "Live" : "Fallback"} />
                     </div>
-                    <div className="mx-auto h-48 w-48 rounded-full" style={{
-                        background: `conic-gradient(#ef4444 0% ${dummyPie[0]}%, #f97316 ${dummyPie[0]}% ${dummyPie[0] + dummyPie[1]}%, #eab308 ${dummyPie[0] + dummyPie[1]}% ${dummyPie[0] + dummyPie[1] + dummyPie[2]}%, #fb7185 ${dummyPie[0] + dummyPie[1] + dummyPie[2]}% 100%)`,
-                    }} />
+                    <svg viewBox="0 0 100 100" className="h-48 w-full rounded-xl border border-slate-800 bg-slate-950 p-3">
+                        <polyline fill="none" stroke="#34d399" strokeWidth="2.5" points={pricePoints} />
+                        {cheapestOverall.slice(0, 7).map((point, idx, arr) => {
+                            const x = idx * (100 / (arr.length - 1 || 1));
+                            const y = 100 - Math.round((point.price / Math.max(arr[arr.length - 1]?.price || 1, 0.0001)) * 85);
+                            return <circle key={`${point.provider}-${point.instance}`} cx={x} cy={y} r="1.9" fill="#34d399" />;
+                        })}
+                    </svg>
+                    <p className="mt-3 text-xs text-slate-400">
+                        Plot uses the 7 lowest hourly prices from the current catalog.
+                    </p>
                 </article>
 
-                <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5">
+                <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5 lg:col-span-2">
                     <div className="mb-4 flex items-center justify-between">
-                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Live Profile Coverage</h3>
-                        <StatusDot type="Functional" />
+                        <h3 className="font-[Space_Grotesk] text-lg font-bold text-slate-100">Top 10 Cheapest Instances (Hourly)</h3>
+                        <StatusDot type={liveProviderCount > 0 ? "Live" : "Fallback"} />
                     </div>
-                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-5">
-                        <p className="text-sm text-slate-300">Profiles with company info</p>
-                        <p className="mt-2 font-[Space_Grotesk] text-5xl font-bold text-emerald-400">{loading ? "..." : `${summary.withCompanyPct}%`}</p>
-                        <div className="mt-4 h-3 rounded-full bg-slate-800">
-                            <div className="h-3 rounded-full bg-emerald-400" style={{ width: `${loading ? 8 : Math.max(8, summary.withCompanyPct)}%` }} />
-                        </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-left text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-800 text-slate-400">
+                                    <th className="py-2 pr-3 font-medium">Provider</th>
+                                    <th className="py-2 pr-3 font-medium">Instance</th>
+                                    <th className="py-2 pr-3 font-medium">vCPU</th>
+                                    <th className="py-2 pr-3 font-medium">RAM (GB)</th>
+                                    <th className="py-2 pr-3 font-medium">Region</th>
+                                    <th className="py-2 font-medium">Price/hr</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {cheapestOverall.length === 0 && !loading && (
+                                    <tr>
+                                        <td className="py-3 text-slate-400" colSpan={6}>No pricing rows available.</td>
+                                    </tr>
+                                )}
+
+                                {cheapestOverall.map((row) => (
+                                    <tr key={`${row.provider}-${row.instance}`} className="border-b border-slate-900/80 text-slate-200">
+                                        <td className="py-2 pr-3 font-semibold">{row.provider}</td>
+                                        <td className="py-2 pr-3">{row.instance}</td>
+                                        <td className="py-2 pr-3">{row.vcpu}</td>
+                                        <td className="py-2 pr-3">{row.ram}</td>
+                                        <td className="py-2 pr-3">{row.region}</td>
+                                        <td className="py-2 font-semibold text-emerald-300">{loading ? "..." : `$${row.price.toFixed(4)}`}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </article>
             </div>
