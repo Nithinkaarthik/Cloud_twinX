@@ -129,8 +129,21 @@ export default function CloudTwin() {
   const [aiLastSummary, setAiLastSummary] = useState("");
   const [aiError, setAiError] = useState("");
   const [speakingDeploySteps, setSpeakingDeploySteps] = useState(false);
+  const [voiceChatActive, setVoiceChatActive] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Voice chat idle.");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceSpokenAnswer, setVoiceSpokenAnswer] = useState("");
+  const [voiceError, setVoiceError] = useState("");
   const chatEndRef = useRef(null);
   const deployVoiceRef = useRef(null);
+  const voiceRecognitionRef = useRef(null);
+  const voiceChatActiveRef = useRef(false);
+  const voiceChatQueuedRef = useRef(false);
+  const voiceProcessingRef = useRef(false);
+
+  useEffect(() => {
+    voiceChatActiveRef.current = voiceChatActive;
+  }, [voiceChatActive]);
 
   useEffect(() => {
     let active = true;
@@ -245,14 +258,165 @@ Rules:
 
   const stopDeployVoiceGuide = () => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    voiceChatQueuedRef.current = false;
     window.speechSynthesis.cancel();
     setSpeakingDeploySteps(false);
+  };
+
+  const stopVoiceConversation = () => {
+    voiceChatQueuedRef.current = false;
+    voiceProcessingRef.current = false;
+    setVoiceChatActive(false);
+    setVoiceStatus("Voice chat stopped.");
+    setVoiceSpokenAnswer("");
+
+    const recognition = voiceRecognitionRef.current;
+    voiceRecognitionRef.current = null;
+
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onend = null;
+      recognition.onerror = null;
+      recognition.onstart = null;
+      try {
+        recognition.stop();
+      } catch { }
+    }
+
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const speakVoiceReply = (text) => {
+    return new Promise((resolve) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        resolve();
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.onend = () => {
+        resolve();
+        if (voiceChatActiveRef.current) {
+          setTimeout(() => startVoiceConversation(), 350);
+        }
+      };
+      utterance.onerror = () => {
+        resolve();
+        if (voiceChatActiveRef.current) {
+          setTimeout(() => startVoiceConversation(), 350);
+        }
+      };
+      setVoiceSpokenAnswer(text);
+      setVoiceStatus("Twin AI speaking...");
+      window.speechSynthesis.speak(utterance);
+    });
+  };
+
+  const startVoiceConversation = () => {
+    if (typeof window === "undefined") return false;
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceError("Speech recognition is not supported in this browser.");
+      setVoiceStatus("Voice recognition unavailable.");
+      setVoiceChatActive(false);
+      return false;
+    }
+
+    const recognition = new Recognition();
+    voiceRecognitionRef.current = recognition;
+    voiceProcessingRef.current = false;
+    setVoiceChatActive(true);
+    setVoiceError("");
+    setVoiceSpokenAnswer("");
+    setVoiceStatus("Listening for your question...");
+
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setVoiceStatus("Listening for your question...");
+    };
+
+    recognition.onresult = async (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0]?.transcript || "")
+        .join(" ")
+        .trim();
+
+      if (!transcript || voiceProcessingRef.current) return;
+
+      voiceProcessingRef.current = true;
+      setVoiceTranscript(transcript);
+      setVoiceStatus("Thinking...");
+      setChatMessages((messages) => [...messages, { role: "user", content: transcript }]);
+
+      const currentRecognition = voiceRecognitionRef.current;
+      voiceRecognitionRef.current = null;
+      if (currentRecognition) {
+        try {
+          currentRecognition.stop();
+        } catch { }
+      }
+
+      try {
+        const reply = await callGroq(
+          [{ role: "user", content: transcript }],
+          buildCloudSystemPrompt(form, selectedResult)
+        );
+        setChatMessages((messages) => [...messages, { role: "assistant", content: reply }]);
+        await speakVoiceReply(reply);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Error connecting to AI.";
+        setVoiceError(message);
+        setVoiceStatus("Voice chat ready.");
+        setChatMessages((messages) => [...messages, { role: "assistant", content: message }]);
+      } finally {
+        voiceProcessingRef.current = false;
+      }
+    };
+
+    recognition.onerror = (event) => {
+      voiceRecognitionRef.current = null;
+      voiceProcessingRef.current = false;
+      setVoiceError(`Speech recognition error: ${event.error || "unknown"}`);
+      setVoiceStatus("Voice chat stopped.");
+      setVoiceChatActive(false);
+    };
+
+    recognition.onend = () => {
+      voiceRecognitionRef.current = null;
+      if (voiceChatActiveRef.current && !voiceProcessingRef.current && !window.speechSynthesis.speaking) {
+        setTimeout(() => startVoiceConversation(), 400);
+      }
+    };
+
+    try {
+      recognition.start();
+      return true;
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : "Unable to start voice recognition.");
+      setVoiceStatus("Voice recognition unavailable.");
+      setVoiceChatActive(false);
+      voiceRecognitionRef.current = null;
+      return false;
+    }
   };
 
   const handleSpeakDeploySteps = () => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
     window.speechSynthesis.cancel();
+    voiceChatQueuedRef.current = true;
+    setVoiceChatActive(false);
+    setVoiceStatus("Voice guide playing...");
     const summaryText = [
       "CloudTwin deployment voice guide.",
       ...deploymentSteps.map((step, index) => `Step ${index + 1}. ${step}`),
@@ -262,8 +426,18 @@ Rules:
     const utterance = new SpeechSynthesisUtterance(summaryText);
     utterance.rate = 1;
     utterance.pitch = 1;
-    utterance.onend = () => setSpeakingDeploySteps(false);
-    utterance.onerror = () => setSpeakingDeploySteps(false);
+    utterance.onend = () => {
+      setSpeakingDeploySteps(false);
+      if (voiceChatQueuedRef.current) {
+        voiceChatQueuedRef.current = false;
+        setTimeout(() => startVoiceConversation(), 450);
+      }
+    };
+    utterance.onerror = () => {
+      setSpeakingDeploySteps(false);
+      voiceChatQueuedRef.current = false;
+      setVoiceStatus("Voice guide stopped.");
+    };
 
     setSpeakingDeploySteps(true);
     requestAnimationFrame(() => {
@@ -274,6 +448,7 @@ Rules:
 
   useEffect(() => {
     return () => {
+      stopVoiceConversation();
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -881,6 +1056,87 @@ Rules:
                         authenticate your cloud account, save your generated template as main.tf, run terraform init,
                         terraform plan, and terraform apply, and finally validate networking and security settings.
                       </p>
+                    </div>
+                  </div>
+                )}
+
+                {(voiceChatActive || voiceTranscript || voiceError || voiceStatus) && (
+                  <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-slate-950/70 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">Twin AI Voice Chat</p>
+                        <p className="mt-1 text-xs text-slate-400">{voiceStatus}</p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={startVoiceConversation}
+                          className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={voiceChatActive && voiceRecognitionRef.current !== null}
+                        >
+                          <Icon name="mic" size={13} />
+                          Ask by Voice
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={stopVoiceConversation}
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/70 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={!voiceChatActive && !voiceRecognitionRef.current && !window?.speechSynthesis?.speaking}
+                        >
+                          <Icon name="micOff" size={13} />
+                          Stop Voice Chat
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-slate-800 bg-[#0f1b2b] p-4 shadow-[inset_0_0_30px_rgba(16,185,129,0.12)]">
+                      <div className="mx-auto max-w-2xl text-center">
+                        <div className="relative mx-auto flex h-60 w-full max-w-lg items-center justify-center rounded-3xl border border-emerald-300/45 bg-slate-900/70 shadow-[inset_0_0_40px_rgba(20,184,166,0.16),0_0_36px_rgba(16,185,129,0.28)]">
+                          <span className="absolute h-56 w-56 animate-pulse rounded-full bg-emerald-500/10 blur-2xl" />
+                          <span className="absolute h-48 w-48 animate-ping rounded-full border border-emerald-300/35" style={{ animationDuration: "1.8s" }} />
+                          <span className="absolute h-52 w-52 rounded-full border border-emerald-300/55" />
+
+                          <span className="absolute left-[22%] top-[26%] h-2 w-2 animate-ping rounded-full bg-emerald-300" style={{ animationDelay: "0.2s" }} />
+                          <span className="absolute right-[23%] top-[33%] h-1.5 w-1.5 animate-ping rounded-full bg-emerald-200" style={{ animationDelay: "0.7s" }} />
+                          <span className="absolute bottom-[27%] left-[28%] h-1.5 w-1.5 animate-ping rounded-full bg-emerald-100" style={{ animationDelay: "1.1s" }} />
+                          <span className="absolute bottom-[30%] right-[26%] h-2 w-2 animate-ping rounded-full bg-emerald-300" style={{ animationDelay: "1.4s" }} />
+
+                          <div className="relative h-36 w-36 overflow-hidden rounded-full border-2 border-emerald-300/70 shadow-[0_0_30px_rgba(16,185,129,0.7)] md:h-44 md:w-44">
+                            <img
+                              src={TWIN_BOT_GIF}
+                              alt="Twin Bot"
+                              className="h-full w-full object-cover"
+                              style={{ filter: "hue-rotate(95deg) saturate(1.6) brightness(1.2)" }}
+                            />
+                          </div>
+                        </div>
+
+                        <p className="mt-4 text-xs font-semibold tracking-[0.14em] text-emerald-300">Twin Bot Speaking...</p>
+                        <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-100 md:text-base">
+                          Hello, I am Twin Bot. Ask me any deployment or cloud question by voice and I will answer here and speak it back.
+                        </p>
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-200">
+                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                          <Icon name="chat" size={13} /> Voice Transcript
+                        </div>
+                        <p className="mt-2 text-slate-300">
+                          {voiceTranscript || "Tap Ask by Voice or wait for the deployment guide to finish, then speak your question."}
+                        </p>
+                        {voiceError && <p className="mt-2 text-rose-300">{voiceError}</p>}
+                      </div>
+
+                      {voiceSpokenAnswer && (
+                        <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">
+                            <Icon name="volume" size={13} /> Spoken Answer
+                          </div>
+                          <p className="mt-2 leading-6 text-slate-100">{voiceSpokenAnswer}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
