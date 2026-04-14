@@ -16,6 +16,7 @@ const ALLOWED_VCPU = [1, 2, 4, 8, 16];
 const ALLOWED_RAM = [1, 2, 4, 8, 16, 32, 64];
 const ALLOWED_APP_TYPES = ["web", "api", "ml", "db", "batch"];
 const ALLOWED_CLOUDS = ["all", "aws", "gcp", "azure"];
+const TWIN_BOT_GIF = "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZ2x4aWJ5d2w4N2JvODRiNjBuOHUza2RzNTQwNndvdjM4M2s2bnBzaSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/qgQUggAC3Pfv687qPC/giphy.gif";
 
 function pickNearest(value, options) {
   return options.reduce((best, current) => {
@@ -127,7 +128,9 @@ export default function CloudTwin() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiLastSummary, setAiLastSummary] = useState("");
   const [aiError, setAiError] = useState("");
+  const [speakingDeploySteps, setSpeakingDeploySteps] = useState(false);
   const chatEndRef = useRef(null);
+  const deployVoiceRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -176,6 +179,14 @@ export default function CloudTwin() {
   };
 
   const hasAnyLiveSource = Object.values(pricingSource).some((mode) => mode === "live" || mode === "partial-live");
+
+  const deploymentSteps = [
+    "Install Terraform on your machine.",
+    "Authenticate cloud credentials (aws configure, gcloud auth, or az login).",
+    "Save this template as main.tf in a clean folder.",
+    "Run terraform init, terraform plan, then terraform apply.",
+    "Validate network, security, and tags after provisioning.",
+  ];
 
   const handleSimulate = async () => {
     await runAndSetSimulation(form);
@@ -231,6 +242,43 @@ Rules:
       setTimeout(() => setCopied(false), 1600);
     });
   };
+
+  const stopDeployVoiceGuide = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    setSpeakingDeploySteps(false);
+  };
+
+  const handleSpeakDeploySteps = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    window.speechSynthesis.cancel();
+    const summaryText = [
+      "CloudTwin deployment voice guide.",
+      ...deploymentSteps.map((step, index) => `Step ${index + 1}. ${step}`),
+      "After apply completes, verify outputs and access settings before sharing endpoints.",
+    ].join(" ");
+
+    const utterance = new SpeechSynthesisUtterance(summaryText);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onend = () => setSpeakingDeploySteps(false);
+    utterance.onerror = () => setSpeakingDeploySteps(false);
+
+    setSpeakingDeploySteps(true);
+    requestAnimationFrame(() => {
+      deployVoiceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    window.speechSynthesis.speak(utterance);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const handleChat = async () => {
     if (!chatInput.trim() || chatLoading) return;
@@ -759,13 +807,7 @@ Rules:
                 <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
                   <Icon name="info" size={13} /> Deployment Steps
                 </div>
-                {[
-                  "Install Terraform on your machine.",
-                  "Authenticate cloud credentials (aws configure, gcloud auth, or az login).",
-                  "Save this template as main.tf in a clean folder.",
-                  "Run terraform init, terraform plan, then terraform apply.",
-                  "Validate network, security, and tags after provisioning.",
-                ].map((step, i) => (
+                {deploymentSteps.map((step, i) => (
                   <div key={step} className="mb-2.5 flex items-start gap-3">
                     <div className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-sky-500/40 bg-sky-500/15 text-xs font-bold text-sky-300">
                       {i + 1}
@@ -773,6 +815,75 @@ Rules:
                     <p className="font-['JetBrains_Mono'] text-xs leading-6 text-slate-300">{step}</p>
                   </div>
                 ))}
+
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                  <div className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Quick Commands</div>
+                  <pre className="overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-3 font-['JetBrains_Mono'] text-xs leading-6 text-cyan-300">
+                    terraform init
+                    terraform plan
+                    terraform apply
+                  </pre>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSpeakDeploySteps}
+                    className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={speakingDeploySteps}
+                  >
+                    <Icon name="volume" size={13} />
+                    {speakingDeploySteps ? "Voice Guide Playing" : "Play Voice Instructions"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={stopDeployVoiceGuide}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/70 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!speakingDeploySteps}
+                  >
+                    <Icon name="stop" size={13} />
+                    Stop Voice
+                  </button>
+
+                  <p className="text-xs text-slate-400">Voice uses your browser's built-in text-to-speech.</p>
+                </div>
+
+                {speakingDeploySteps && (
+                  <div
+                    ref={deployVoiceRef}
+                    className="mt-5 rounded-3xl border border-emerald-400/50 bg-[#132132] p-5 shadow-[0_0_28px_rgba(16,185,129,0.45)] md:p-7"
+                  >
+                    <div className="mx-auto max-w-2xl text-center">
+                      <div className="relative mx-auto flex h-64 w-full max-w-lg items-center justify-center rounded-3xl border border-emerald-300/45 bg-slate-900/70 shadow-[inset_0_0_40px_rgba(20,184,166,0.2),0_0_36px_rgba(16,185,129,0.35)]">
+                        <span className="absolute h-60 w-60 animate-pulse rounded-full bg-emerald-500/10 blur-2xl" />
+                        <span className="absolute h-52 w-52 animate-ping rounded-full border border-emerald-300/35" style={{ animationDuration: "1.6s" }} />
+                        <span className="absolute h-56 w-56 rounded-full border border-emerald-300/55" />
+
+                        <span className="absolute left-[22%] top-[26%] h-2 w-2 animate-ping rounded-full bg-emerald-300" style={{ animationDelay: "0.2s" }} />
+                        <span className="absolute right-[23%] top-[33%] h-1.5 w-1.5 animate-ping rounded-full bg-emerald-200" style={{ animationDelay: "0.7s" }} />
+                        <span className="absolute bottom-[27%] left-[28%] h-1.5 w-1.5 animate-ping rounded-full bg-emerald-100" style={{ animationDelay: "1.1s" }} />
+                        <span className="absolute bottom-[30%] right-[26%] h-2 w-2 animate-ping rounded-full bg-emerald-300" style={{ animationDelay: "1.4s" }} />
+
+                        <div className="relative h-36 w-36 overflow-hidden rounded-full border-2 border-emerald-300/70 shadow-[0_0_30px_rgba(16,185,129,0.7)] md:h-44 md:w-44">
+                          <img
+                            src={TWIN_BOT_GIF}
+                            alt="Twin Bot"
+                            className="h-full w-full object-cover"
+                            style={{ filter: "hue-rotate(95deg) saturate(1.6) brightness(1.2)" }}
+                          />
+                        </div>
+                      </div>
+
+                      <p className="mt-4 text-xs font-semibold tracking-[0.14em] text-emerald-300">Twin Bot Speaking...</p>
+                      <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-100 md:text-base">
+                        Hello, I am Twin Bot. I will guide you through deployment. First install Terraform, then
+                        authenticate your cloud account, save your generated template as main.tf, run terraform init,
+                        terraform plan, and terraform apply, and finally validate networking and security settings.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
